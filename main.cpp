@@ -1,3 +1,4 @@
+#include <array>
 #include <exception>
 #include <iostream>
 #include <vector>
@@ -13,228 +14,64 @@ GLFWwindow* win = nullptr;
 int winWidth = 480;
 int winHeight = 480;
 
-unique_ptr<ShaderProgram> phong;
-unique_ptr<VertexArray> phong_va;
+unique_ptr<ShaderProgram> phong_yuv;
+unique_ptr<VertexArray> phong_yuv_va;
 unique_ptr<UniformBuffer> camera_ubo;
 unique_ptr<UniformBuffer> light_color_ubo;
-unique_ptr<UniformBuffer> light_position_ubo;
+unique_ptr<UniformBuffer> light_direction_ubo;
 unique_ptr<UniformBuffer> material_ubo;
 unique_ptr<UniformBuffer> model_ubo;
-unique_ptr<ArrayBuffer> position_vbo;
-unique_ptr<ArrayBuffer> tex2_vbo;
-unique_ptr<ElementArrayBuffer> index_vbo;
+unique_ptr<ArrayBuffer> obj_pos_vbo;
+unique_ptr<ArrayBuffer> yuv_vbo;
+unique_ptr<ElementArrayBuffer> tri_index_ibo;
+
+template <typename T>
+struct Vec3 {
+  Vec3(const T x, const T y, const T z) : x(x), y(y), z(z) {}
+  T x;
+  T y;
+  T z;
+};
+
+typedef Vec3<GLfloat> Vec3f;
+typedef Vec3<GLushort> Vec3us;
 
 //! DOCS
 void framebufferSizeCallback(GLFWwindow* win,
                              const int w, const int h)
 {
-  cout << "framebufferSizeCallback" << endl;
+  //cout << "framebufferSizeCallback" << endl;
 
   winWidth = w;
   winHeight = h;
-
-#if 0
-  using std::cout;
-
-  winSize[0] = w;
-  winSize[1] = h;
-  cout << "Resize: " << winSize << "\n";
-
-  // Update scene viewport. Covers entire window.
-  sceneViewport.x = 0;
-  sceneViewport.y = 0;
-  sceneViewport.width = static_cast<GLsizei>(winSize[0]);
-  sceneViewport.height = static_cast<GLsizei>(winSize[1]);
-  cout << "Scene viewport: "
-    << vec4i(sceneViewport.x,
-             sceneViewport.y,
-             sceneViewport.width,
-             sceneViewport.height)
-    << "\n";
-
-  // Update contour plane viewport. Always in lower left corner.
-  GLint const contourPlaneViewportDim =
-    std::max(
-      static_cast<GLint>((1./3)*sceneViewport.width),
-      static_cast<GLint>((1./3)*sceneViewport.height));
-  contourPlaneViewport.x =
-    sceneViewport.width - contourPlaneViewportDim;
-  contourPlaneViewport.y = 0;
-  contourPlaneViewport.width = contourPlaneViewportDim;
-  contourPlaneViewport.height = contourPlaneViewportDim;
-  cout << "Contour plane viewport: "
-    << vec4i(contourPlaneViewport.x,
-             contourPlaneViewport.y,
-             contourPlaneViewport.width,
-             contourPlaneViewport.height)
-    << "\n";
-
-  // Update scene camera. Take new scene viewport aspect ratio into account.
-  Frustum newFrustum(sceneCamera.frustum());
-  GLfloat const widthToHeightRatio =
-    static_cast<GLfloat>(sceneViewport.width)/sceneViewport.height;
-  newFrustum.left = -.5f*widthToHeightRatio;
-  newFrustum.right = .5f*widthToHeightRatio;
-  sceneCamera.setProjection(newFrustum);
-
-  sliceTexture.reset(
-    new ndj::Texture2D(
-      GL_TEXTURE_2D,
-      2*contourPlaneViewportDim,
-      2*contourPlaneViewportDim));
-  cout << "Slice texture size: " <<
-    vec2i(sliceTexture->width(), sliceTexture->height()) << "\n";
-  sliceFbo.reset(new ndj::Framebuffer(GL_FRAMEBUFFER));
-  sliceFbo->attachTexture2D(GL_COLOR_ATTACHMENT0, sliceTexture->handle());
-#endif
+  viewport(0, 0, w, h);
 }
 
 //! DOCS
 void keyCallback(GLFWwindow* window,
                  int key, int scancode, int action, int mods)
 {
-  cout << "keyCallback" << endl;
-
-
-#if 0
-  using std::cout;
-
-  switch (action) {
-  case GLFW_PRESS:
-    switch (k) {
-    case 'F':
-      //cam.frame(sceneMin, sceneMax);
-      break;
-    case 'S':
-      switch (sliceMode) {
-      case GPU:
-        sliceMode = CPU;
-        cout << "Slice mode: CPU\n";
-        break;
-      case CPU:
-        sliceMode = GPU;
-        cout << "Slice mode: GPU\n";
-        break;
-      }
-      break;
-    case GLFW_KEY_ESC:
-      break;
-    case GLFW_KEY_UP:
-      break;
-    case GLFW_KEY_DOWN:
-      break;
-    case GLFW_KEY_LEFT:
-      break;
-    case GLFW_KEY_RIGHT:
-      break;
-    default:
-      break;
-    }
-    break;
-  case GLFW_RELEASE:
-    break;
-  default:
-    break;
-  }
-#endif
+  //cout << "keyCallback" << endl;
 }
 
 //! DOCS
 void cursorPosCallback(GLFWwindow* win,
                        const double mx, const double my)
 {
-  using namespace std;
-
   //cout << "cursorPosCallback" << endl;
-
-#if 0
-  int const dx = mx - dragLastX;
-  int const dy = my - dragLastY;
-  if (lmbPressed) {
-    //GLint vp[4];
-    //ndj::Viewport::getViewport(vp);
-    vec3f const dr =
-      vec3f(static_cast<GLfloat>(dy), static_cast<GLfloat>(dx), 0.f);
-    meshModel.setRotation(meshModel.rotation() - dr);
-    meshModel.setNormalMatrix(sceneCamera.uniformData().viewMatrix);
-  }
-  else if (mmbPressed) {
-    // TODO: implement camera panning!
-  }
-  else if (rmbPressed) {
-    GLfloat const minMeshDimension =
-      thx::min(meshGeometry.max[0] - meshGeometry.min[0],
-               meshGeometry.max[1] - meshGeometry.min[1],
-               meshGeometry.max[2] - meshGeometry.min[2]);
-    vec3f const dp = vec3f(0.f, 0.f, (2.f*minMeshDimension*dy)/winSize[0]);
-    sceneCamera.setView(sceneCamera.position() - dp, vec3f(0.f));
-  }
-
-  dragLastX = mx;
-  dragLastY = my;
-#endif
 }
 
 //! DOCS
 void mouseButtonCallback(GLFWwindow* window,
                          int button, int action, int mods)
 {
-  using namespace std;
-
-  cout << "mouseButtonCallback" << endl;
-
-#if 0
-  glfwGetMousePos(&dragStartX, &dragStartY);
-  dragLastX = dragStartX;
-  dragLastY = dragStartY;
-
-  switch (button) {
-  case GLFW_MOUSE_BUTTON_LEFT:
-    switch (state) {
-    case GLFW_PRESS:
-      lmbPressed = true;
-      break;
-    case GLFW_RELEASE:
-      lmbPressed = false;
-      break;
-    default:
-      break;
-    }
-    break;
-  case GLFW_MOUSE_BUTTON_MIDDLE:
-    switch (state) {
-    case GLFW_PRESS:
-      mmbPressed = true;
-      break;
-    case GLFW_RELEASE:
-      mmbPressed = false;
-      break;
-    default:
-      break;
-    }
-    break;
-  case GLFW_MOUSE_BUTTON_RIGHT:
-    switch (state) {
-    case GLFW_PRESS:
-      rmbPressed = true;
-      break;
-    case GLFW_RELEASE:
-      rmbPressed = false;
-      break;
-    default:
-      break;
-    }
-    break;
-  default:
-    break;
-  }
-#endif
+  //cout << "mouseButtonCallback" << endl;
 }
 
 //! DOCS
 void scrollCallback(GLFWwindow* win, double xoffset, double yoffset)
 {
-  cout << "scrollCallback" << endl;
+  //cout << "scrollCallback" << endl;
 }
 
 //! DOCS
@@ -258,7 +95,9 @@ void initGLFW(const int width, const int height)
     throw runtime_error("GLFW init error");
   }
 
-  win = glfwCreateWindow(width, height, "fstudio", nullptr, nullptr);
+  glfwWindowHint(GLFW_SAMPLES, 4);
+
+  win = glfwCreateWindow(width, height, "yuv-valence", nullptr, nullptr);
   if (win == nullptr) {
     throw runtime_error("GLFW Open Window error");
   }
@@ -273,8 +112,6 @@ void initGLFW(const int width, const int height)
 //! DOCS
 void initGLEW()
 {
-  using namespace std;
-
   try {
     glewExperimental = GL_TRUE;
     GLenum const glewErr = glewInit();
@@ -296,7 +133,7 @@ void initGL()
   clearDepth(1.);
   depthRange(0., 1.);
   enable(GL_MULTISAMPLE);
-  disable(GL_CULL_FACE);
+  //enable(GL_CULL_FACE);
   //disable(GL_NORMALIZE);
 
   glfwGetFramebufferSize(win, &winWidth, &winHeight);
@@ -324,183 +161,305 @@ void initGL()
 
 void buildShaderPrograms()
 {
-  phong.reset(new ShaderProgram(
-    VertexShader(readShaderFile("shaders/phong.vs")),
-    GeometryShader(readShaderFile("shaders/phong.gs")),
-    FragmentShader(readShaderFile("shaders/phong.fs"))));
-  phong->activeUniformBlock("Camera").bind(1);
-  phong->activeUniformBlock("LightColor").bind(2);
-  phong->activeUniformBlock("LightPosition").bind(3);
-  phong->activeUniformBlock("Material").bind(4);
-  phong->activeUniformBlock("Model").bind(5);
-  cout << "Phong:" << endl << *phong << endl;
+  phong_yuv.reset(new ShaderProgram(
+    VertexShader(readShaderFile("shaders/phong_yuv.vs")),
+    GeometryShader(readShaderFile("shaders/phong_yuv.gs")),
+    FragmentShader(readShaderFile("shaders/phong_yuv.fs"))));
+  phong_yuv->activeUniformBlock("Camera").bind(1);
+  phong_yuv->activeUniformBlock("LightColor").bind(2);
+  phong_yuv->activeUniformBlock("LightDirection").bind(3);
+  phong_yuv->activeUniformBlock("Material").bind(4);
+  phong_yuv->activeUniformBlock("Model").bind(5);
+  cout << "Phong:" << endl << *phong_yuv << endl;
 }
+
+void makeGrid(const GLfloat x_min, const GLfloat y_min, const GLfloat z_min,
+              const GLfloat x_max, const GLfloat y_max, const GLfloat z_max,
+              const GLfloat u_min, const GLfloat u_max,
+              const GLfloat v_min, const GLfloat v_max,
+              const int nx, const int ny,
+              vector<Vec3f>* obj_pos,
+              vector<Vec3f>* yuv,
+              vector<Vec3us>* tri_index)
+{
+  const GLfloat x_dim = x_max - x_min;
+  const GLfloat y_dim = y_max - y_min;
+  const GLfloat dx = x_dim / nx;
+  const GLfloat dy = y_dim / ny;
+  const GLfloat z = 0.0f; // TMP
+  const GLfloat u_dim = u_max - u_min;
+  const GLfloat v_dim = v_max - v_min;
+  const GLfloat y = 0.5f; // TMP
+  const GLfloat du = u_dim / nx;
+  const GLfloat dv = v_dim / ny;
+
+  obj_pos->push_back(Vec3f(x_min, y_min, 0.0f));
+  obj_pos->push_back(Vec3f(x_max, y_min, -8.0f));
+  obj_pos->push_back(Vec3f(x_max, y_max, -5.0f));
+  obj_pos->push_back(Vec3f(x_min, y_max, 0.0f));
+  obj_pos->push_back(Vec3f(x_min + 0.5f * x_dim, y_min + 0.5f * y_dim, 0.0f));
+
+  yuv->push_back(Vec3f(0.5f, u_min, v_min));
+  yuv->push_back(Vec3f(0.5f, u_max, v_min));
+  yuv->push_back(Vec3f(0.5f, u_max, v_max));
+  yuv->push_back(Vec3f(0.5f, u_min, v_max));
+  yuv->push_back(Vec3f(0.5f, u_min + 0.5f * u_dim, v_min + 0.5f * v_dim));
+
+  tri_index->push_back(Vec3us(4, 0, 1));
+  tri_index->push_back(Vec3us(4, 1, 2));
+  tri_index->push_back(Vec3us(4, 2, 3));
+  tri_index->push_back(Vec3us(4, 3, 0));
 
 #if 0
-pair<vector<GLfloat>, vector<GLushort>> makeGrid(const GLfloat x_min,
-                                                 const GLfloat x_max,
-                                                 const GLfloat y_min,
-                                                 const GLfloat y_max,
-                                                 const GLfloat z_min,
-                                                 const GLfloat z_max,
-                                                 const GLfloat u_min,
-                                                 const GLfloat u_max,
-                                                 const GLfloat v_min,
-                                                 const GLfloat v_max,
-                                                 const int n_x,
-                                                 const int n_y)
-{
+  const GLfloat yuv[13 * 3] = {
+    0.5f, u_min, v_min,
+    0.5f, u_mid, v_min,
+    0.5f, u_max, v_min,
+    0.5f, 0.25f * (u_min + u_max), 0.25f * (v_min + v_max),
+    0.5f, 0.75f * (u_min + u_max), 0.25f * (v_min + v_max),
+    0.5f, u_min, v_mid,
+    0.5f, u_mid, v_mid,
+    0.5f, u_max, v_mid,
+    0.5f, 0.25f * (u_min + u_max), 0.75f * (v_min + v_max),
+    0.5f, 0.75f * (u_min + u_max), 0.75f * (v_min + v_max),
+    0.5f, u_min, v_max,
+    0.5f, u_mid, v_max,
+    0.5f, u_max, v_max,};
+  yuv_vbo.reset(new ArrayBuffer(13 * 3 * sizeof(GLfloat), yuv));
 
-}
+  //const GLfloat obj_pos[5 * 3] = {
+  //  y_min, y_min, 0.0f,
+  //  y_min, y_max, -8.0f,
+  //  y_max, y_max, -5.0f,
+  //  y_max, y_min, 0.0f,
+  //  -5.0f, -5.0f, -5.0f };
+
+  const GLushort index[4 * 3] = {
+    4, 0, 1,
+    4, 1, 2,
+    4, 2, 3,
+    4, 3, 0 };
+  index_vbo.reset(new ElementArrayBuffer(4 * 3 * sizeof(GLushort), index));
+  cout << "index count: "
+       << static_cast<GLsizei>(index_vbo->sizeInBytes() / sizeof(GLushort))
+       << endl;
+  cout << "triangle count: "
+       << static_cast<GLsizei>(index_vbo->sizeInBytes() / sizeof(GLushort)) / 3
+       << endl;
 #endif
+
+
+
+#if 0
+  vector<GLfloat> obj_pos;
+  vector<GLfloat> yuv;
+
+  // Grid.
+  for (int gy = 0; gy <= ny; ++gy) {
+    for (int gx = 0; gx <= nx; ++gx) {
+      obj_pos.push_back(x_min + gx * dx);
+      obj_pos.push_back(y_min + gy * dy);
+      obj_pos.push_back(z);
+      yuv.push_back(y);
+      yuv.push_back(u_min + gx * du);
+      yuv.push_back(v_min + gy * dv);
+    }
+  }
+
+  cout << "grid vertices: " << obj_pos.size() / 3 << endl;
+
+  vector<GLushort> tri_indices;
+  int pivot_index = 0;
+
+  // Pivots.
+  for (int py = 0; py < ny; ++py) {
+    for (int px = 0; px < nx; ++px) {
+      obj_pos.push_back(x_min + (px + 0.5f) * dx);
+      obj_pos.push_back(y_min + (py + 0.5f) * dy);
+      obj_pos.push_back(z);
+      yuv.push_back(y);
+      yuv.push_back(u_min + (px + 0.5f) * du);
+      yuv.push_back(v_min + (py + 0.5f) * dv);
+
+      tri_indices.push_back(pivot_index);
+      tri_indices.push_back(ix);
+      tri_indices.push_back(ix + 1);
+
+      tri_indices.push_back(pivot_index,);
+      tri_indices.push_back(ix);
+      tri_indices.push_back();
+
+      tri_indices.push_back(pivot_index,);
+      tri_indices.push_back();
+      tri_indices.push_back();
+
+      tri_indices.push_back(pivot_index,);
+      tri_indices.push_back();
+      tri_indices.push_back();
+
+      ++pivot_index;
+    }
+  }
+#endif
+}
 
 void initScene()
 {
-  const GLfloat cam_right[3] = { 1.0f, 0.0f, 0.0f };
-  const GLfloat cam_up[3] = { 0.0f, 1.0f, 0.0f };
-  const GLfloat cam_back[3] = { 0.0f, 0.0f, 1.0f };
-  const GLfloat cam_pos[3] = { 0.0f, 0.0f, 1.0f };
-  GLfloat camera[2 * 16] = { 0.0f };
-  makeViewMatrix(cam_right, cam_up, cam_back, cam_pos, &camera[0]);
-  makeOrthographicProjectionMatrix(
-    -100.0f, 100.0f,
-    -100.0f, 100.0f,
-    1.0f, 100.0f,
-    &camera[16]);
-  camera_ubo.reset(new UniformBuffer(2 * 16 * sizeof(GLfloat), &camera));
-  bindUniformBuffer(*phong, "Camera", *camera_ubo);
-
-  const GLfloat light_color[3 * 4] = {
-    1.0f, 1.0f, 1.0f, 1.0f,   // Ambient.
-    1.0f, 1.0f, 1.0f, 1.0f,   // Diffuse.
-    1.0f, 1.0f, 1.0f, 1.0f }; // Specular.
-  light_color_ubo.reset(new UniformBuffer(3 * 4 * sizeof(GLfloat), light_color));
-  bindUniformBuffer(*phong, "LightColor", *light_color_ubo);
-
-  const GLfloat light_position[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
-  light_position_ubo.reset(new UniformBuffer(4 * sizeof(GLfloat), light_position));
-  bindUniformBuffer(*phong, "LightPosition", *light_position_ubo);
-
-  const GLfloat material[24] = {
-    0.2f, 0.2f, 0.2f, 1.0f, // Front ambient.
-    0.5f, 0.5f, 0.5f, 1.0f, // Front diffuse.
-    0.1f, 0.1f, 0.1f, 1.0f, // Front specular.
-    0.2f, 0.2f, 0.2f, 1.0f, // Back ambient.
-    0.5f, 0.5f, 0.5f, 1.0f, // Back diffuse.
-    0.1f, 0.1f, 0.1f, 1.0f  // Back specular.
-  };
-//  const GLfloat material[6 * 4] = {
-//    1.0f, 1.0f, 1.0f, 1.0f,   // Front ambient.
-//    0.0f, 0.0f, 0.0f, 1.0f,   // Front diffuse.
-//    0.0f, 0.0f, 0.0f, 1.0f,   // Front specular.
-//    1.0f, 1.0f, 1.0f, 1.0f,   // Back ambient.
-//    0.0f, 0.0f, 0.0f, 1.0f,   // Back diffuse.
-//    0.0f, 0.0f, 0.0f, 1.0f }; // Back specular.
-  material_ubo.reset(new UniformBuffer(6 * 4 * sizeof(GLfloat), material));
-  bindUniformBuffer(*phong, "Material", *material_ubo);
-
-  const GLfloat model[2 * 16] = {
-    1.0f, 0.0f, 0.0f, 0.0f, // Model matrix, column 0.
-    0.0f, 1.0f, 0.0f, 0.0f,
-    0.0f, 0.0f, 1.0f, 0.0f,
-    0.0f, 0.0f, 0.0f, 1.0f,
-    1.0f, 0.0f, 0.0f, 0.0f, // Normal matrix, column 0.
-    0.0f, 1.0f, 0.0f, 0.0f,
-    0.0f, 0.0f, 1.0f, 0.0f,
-    0.0f, 0.0f, 0.0f, 1.0f };
-  model_ubo.reset(new UniformBuffer(2 * 16 * sizeof(GLfloat), model));
-  bindUniformBuffer(*phong, "Model", *model_ubo);
-
-  const GLfloat x_min = -100.0f;
-  const GLfloat x_max =  100.0f;
-  const GLfloat y_min = -100.0f;
-  const GLfloat y_max =  100.0f;
-//  const GLfloat position[4 * 3] = {
-//    x_min, y_min, 0.0f,
-//    x_max, y_min, 0.0f,
-//    x_min, y_max, 0.0f,
-//    x_max, y_max, 0.0f };
-//  position_vbo.reset(new ArrayBuffer(4 * 3 * sizeof(GLfloat), position));
-  const GLfloat position[5 * 3] = {
-    x_min, y_min, 0.0f,
-    x_max, y_min, 0.0f,
-    1.0f,  1.0f, -25.0f,
-    x_min, y_max, 0.0f,
-    x_max, y_max, 0.0f };
-  position_vbo.reset(new ArrayBuffer(5 * 3 * sizeof(GLfloat), position));
-
+  const GLfloat x_min = -10.0f;
+  const GLfloat y_min = -10.0f;
+  const GLfloat z_min = -10.0f;
+  const GLfloat x_max = 10.0f;
+  const GLfloat y_max = 10.0f;
+  const GLfloat z_max = 10.0f;
   const GLfloat u_min = -0.436f;
   const GLfloat u_max =  0.436f;
   const GLfloat v_min = -0.615f;
   const GLfloat v_max =  0.615f;
-//  const GLfloat tex2[4 * 2] = {
-//    u_min, v_min,
-//    u_max, v_min,
-//    u_min, v_max,
-//    u_max, v_max };
-//  tex2_vbo.reset(new ArrayBuffer(4 * 2 * sizeof(GLfloat), tex2));
-  const GLfloat tex2[5 * 2] = {
-    u_min, v_min,
-    u_max, v_min,
-    0.0f,   0.0f,
-    u_min, v_max,
-    u_max, v_max };
-  tex2_vbo.reset(new ArrayBuffer(5 * 2 * sizeof(GLfloat), tex2));
 
-//  const GLushort index[2 * 3] = {
-//    0, 1, 2, // Triangle 0
-//    1, 3, 2 };
-//  index_vbo.reset(new ElementArrayBuffer(4 * 3 * sizeof(GLushort), index));
-  const GLushort index[4 * 3] = {
-    0, 1, 2, // Triangle 0
-    1, 4, 2,
-    2, 4, 3,
-    0, 2, 3 };
-  index_vbo.reset(new ElementArrayBuffer(4 * 3 * sizeof(GLushort), index));
+  // --------------------------
+  // Initialize uniform blocks.
+  // --------------------------
 
-  phong_va.reset(new VertexArray);
-  phong_va->bind();
+  // Camera.
+  array<GLfloat, 2 * 16> camera = {
+    1.0f, 0.0f, 0.0f, 0.0f, // view_from_world matrix, column 0.
+    0.0f, 1.0f, 0.0f, 0.0f,
+    0.0f, 0.0f, 1.0f, 0.0f,
+    0.0f, 0.0f, 0.0f, 1.0f,
+    1.0f, 0.0f, 0.0f, 0.0f, // clip_from_view, column 0.
+    0.0f, 1.0f, 0.0f, 0.0f,
+    0.0f, 0.0f, 1.0f, 0.0f,
+    0.0f, 0.0f, 0.0f, 1.0f };
+  makeOrthographicProjectionMatrix(
+    x_min, x_max,
+    y_min, y_max,
+    z_min, z_max,
+    &camera[16]);
+  camera_ubo.reset(new UniformBuffer(
+    camera.size() * sizeof(GLfloat), camera.data()));
+  bindUniformBuffer(*phong_yuv, "Camera", *camera_ubo);
 
-  const Attrib position_attrib = phong->activeAttrib("position");
-  const Bindor<ArrayBuffer> position_vbo_bindor(*position_vbo);
-  const VertexAttribArrayEnabler position_vaae(position_attrib.location);
+  // Light color.
+  const array<GLfloat, 1 * 4> light_color = {
+    1.0f, 1.0f, 1.0f, 1.0f }; // Field: light_diffuse_color.
+  light_color_ubo.reset(new UniformBuffer(
+    light_color.size() * sizeof(GLfloat), light_color.data()));
+  bindUniformBuffer(*phong_yuv, "LightColor", *light_color_ubo);
+
+  // Light direction.
+  const array<GLfloat, 1* 4> light_direction = {
+    0.0f, 0.0f, 1.0f, 1.0f }; // Field: light_direction.
+  light_direction_ubo.reset(new UniformBuffer(
+    light_direction.size() * sizeof(GLfloat), light_direction.data()));
+  bindUniformBuffer(*phong_yuv, "LightDirection", *light_direction_ubo);
+
+  // Material.
+  const array<GLfloat, 1 * 4> material = {
+    1.0f, 1.0f, 1.0f, 1.0f, // Field: front_diffuse.
+  };
+  material_ubo.reset(new UniformBuffer(
+    material.size() * sizeof(GLfloat), material.data()));
+  bindUniformBuffer(*phong_yuv, "Material", *material_ubo);
+
+  // Model.
+  const array<GLfloat, 2 * 16> model = {
+    1.0f, 0.0f, 0.0f, 0.0f, // Field: world_from_obj matrix, column 0.
+    0.0f, 1.0f, 0.0f, 0.0f,
+    0.0f, 0.0f, 1.0f, 0.0f,
+    0.0f, 0.0f, 0.0f, 1.0f,
+    1.0f, 0.0f, 0.0f, 0.0f, // Field: world_from_obj_normal, column 0.
+    0.0f, 1.0f, 0.0f, 0.0f,
+    0.0f, 0.0f, 1.0f, 0.0f,
+    0.0f, 0.0f, 0.0f, 1.0f };
+  model_ubo.reset(new UniformBuffer(
+    model.size() * sizeof(GLfloat), model.data()));
+  bindUniformBuffer(*phong_yuv, "Model", *model_ubo);
+
+  // ----------------------
+  // Initialize attributes.
+  // ----------------------
+
+  vector<Vec3f> obj_pos;
+  vector<Vec3f> yuv;
+  vector<Vec3us> tri_index;
+
+  makeGrid(x_min, y_min, z_min,
+           x_max, y_max, z_max,
+           u_min, u_max,
+           v_min, v_max,
+           2, 2,
+           &obj_pos, &yuv, &tri_index);
+
+  obj_pos_vbo.reset(new ArrayBuffer(
+    obj_pos.size() * sizeof(Vec3f), &obj_pos[0]));
+  yuv_vbo.reset(new ArrayBuffer(
+    yuv.size() * sizeof(Vec3f), &yuv[0]));
+  tri_index_ibo.reset(new ElementArrayBuffer(
+    tri_index.size() * sizeof(Vec3us), &tri_index[0]));
+
+  // Create vertex array to remember bindings.
+  phong_yuv_va.reset(new VertexArray);
+  phong_yuv_va->bind();
+
+  // Bind obj_pos attribute.
+  const Attrib obj_pos_attrib = phong_yuv->activeAttrib("obj_pos");
+  const Bindor<ArrayBuffer> obj_pos_vbo_bindor(*obj_pos_vbo);
+  const VertexAttribArrayEnabler obj_pos_vaae(obj_pos_attrib.location);
   vertexAttribPointer(
-    position_attrib.location,
-    3,        // Size.
+    obj_pos_attrib.location,
+    3,        // Number of components.
     VertexAttribType<GLfloat>::VALUE,
     GL_FALSE, // Normalize.
     0,        // Stride.
-    0); // Read from currently bound VBO.
+    0);       // Read from currently bound VBO.
 
-  const Attrib* tex2_attrib = phong->queryActiveAttrib("tex2");
-  const Bindor<ArrayBuffer> tex2_vbo_bindor(*tex2_vbo);
-  const VertexAttribArrayEnabler tex2_vaae(tex2_attrib->location);
+  // Bind yuv attribute.
+  const Attrib* yuv_attrib = phong_yuv->queryActiveAttrib("yuv");
+  const Bindor<ArrayBuffer> yuv_vbo_bindor(*yuv_vbo);
+  const VertexAttribArrayEnabler yuv_vaae(yuv_attrib->location);
   vertexAttribPointer(
-    tex2_attrib->location,
-    2,        // Size.
+    yuv_attrib->location,
+    3,        // Number of components.
     VertexAttribType<GLfloat>::VALUE,
     GL_FALSE, // Normalize.
     0,        // Stride.
-    0); // Read from currently bound VBO.
+    0);       // Read from currently bound VBO.
 
-  const Bindor<ElementArrayBuffer> index_bindor(*index_vbo);
-  phong_va->release();
+  // Bind triangle indices.
+  const Bindor<ElementArrayBuffer> tri_index_bindor(*tri_index_ibo);
+  phong_yuv_va->release();
+
+#if 1
+  cout << "obj_pos count: "
+       << obj_pos_vbo->sizeInBytes() / sizeof(Vec3f)
+       << endl
+       << "yuv count: "
+       << yuv_vbo->sizeInBytes() / sizeof(Vec3f)
+       << endl
+       << "tri_index count: "
+       << 3 * (tri_index_ibo->sizeInBytes() / sizeof(Vec3us))
+       << endl
+       << "triangle count: "
+       << tri_index_ibo->sizeInBytes() / sizeof(Vec3us)
+       << endl;
+#endif
 }
 
 void render()
 {
-  viewport(0, 0, winWidth, winHeight);
-  clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+  clear(GL_COLOR_BUFFER_BIT);
 
-  const Enabler depth_test_enabler(GL_DEPTH_TEST);
+  const Bindor<ShaderProgram> phong_yuv_bindor(*phong_yuv);
+  const Bindor<VertexArray> phong_yuv_va_bindor(*phong_yuv_va);
 
-  const Bindor<ShaderProgram> phong_bindor(*phong);
-  const Bindor<VertexArray> phong_va_bindor(*phong_va);
+  const GLuint min_index = 0;
+  const GLuint max_index = (obj_pos_vbo->sizeInBytes() / sizeof(Vec3f)) - 1;
+  const GLsizei index_count = 3 * tri_index_ibo->sizeInBytes() / sizeof(Vec3us);
   drawRangeElements(
     GL_TRIANGLES,
-    0,
-    static_cast<GLuint>(position_vbo->sizeInBytes() / 3 * sizeof(GLfloat)),
-    3 * static_cast<GLsizei>(index_vbo->sizeInBytes() / 3 * sizeof(GLushort)),
+    min_index,
+    max_index,
+    index_count,
     GLTypeEnum<GLushort>::value,
     0); // Read indices from currently bound element array.
 }
