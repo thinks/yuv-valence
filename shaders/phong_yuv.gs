@@ -25,8 +25,8 @@ void main(void)
   vec4 obj_pos2 = gl_in[2].gl_Position;
 
   // Per-face normal. Same for all vertices of the emitted triangle.
-  vec3 obj_normal = cross(obj_pos0.xyz - obj_pos1.xyz,
-                          obj_pos2.xyz - obj_pos1.xyz);
+  vec3 obj_normal = cross(obj_pos2.xyz - obj_pos1.xyz,
+                          obj_pos0.xyz - obj_pos1.xyz);
   world_normal = normalize(mat3(world_from_obj_normal) * obj_normal);
 
   mat4 clip_from_obj = clip_from_view * view_from_world * world_from_obj;

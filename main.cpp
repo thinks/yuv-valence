@@ -36,6 +36,21 @@ struct Vec3 {
 typedef Vec3<GLfloat> Vec3f;
 typedef Vec3<GLushort> Vec3us;
 
+template <typename T> inline
+Vec3<T> cross(const Vec3<T>& u, const Vec3<T>& v)
+{
+  return Vec3<T>(
+    u.y * v.z - u.z * v.y,
+    u.z * v.x - u.x * v.z,
+    u.x * v.y - u.y * v.x);
+}
+
+template <typename T> inline
+Vec3<T> operator-(const Vec3<T>& u, const Vec3<T>& v)
+{
+  return Vec3<T>(u.x - v.x, u.y - v.y, u.z - v.z);
+}
+
 //! DOCS
 void framebufferSizeCallback(GLFWwindow* win,
                              const int w, const int h)
@@ -130,11 +145,12 @@ void initGLEW()
 void initGL()
 {
   clearColor(0.2f, 0.2f, 0.2f, 1.f);
-  clearDepth(1.);
-  depthRange(0., 1.);
+  clearDepth(1.0);
+  depthRange(0.0, 1.0);
   enable(GL_MULTISAMPLE);
-  //enable(GL_CULL_FACE);
-  //disable(GL_NORMALIZE);
+  frontFace(GL_CCW);
+  cullFace(GL_BACK);
+  enable(GL_CULL_FACE);
 
   glfwGetFramebufferSize(win, &winWidth, &winHeight);
   viewport(0, 0, winWidth, winHeight);
@@ -194,8 +210,8 @@ void makeGrid(const GLfloat x_min, const GLfloat y_min, const GLfloat z_min,
   const GLfloat dv = v_dim / ny;
 
   obj_pos->push_back(Vec3f(x_min, y_min, 0.0f));
-  obj_pos->push_back(Vec3f(x_max, y_min, -8.0f));
-  obj_pos->push_back(Vec3f(x_max, y_max, -5.0f));
+  obj_pos->push_back(Vec3f(x_max, y_min, 0.0f));
+  obj_pos->push_back(Vec3f(x_max, y_max, 0.0f));
   obj_pos->push_back(Vec3f(x_min, y_max, 0.0f));
   obj_pos->push_back(Vec3f(x_min + 0.5f * x_dim, y_min + 0.5f * y_dim, 0.0f));
 
@@ -348,7 +364,7 @@ void initScene()
 
   // Light direction.
   const array<GLfloat, 1* 4> light_direction = {
-    0.0f, 0.0f, 1.0f, 1.0f }; // Field: light_direction.
+    0.0f, 0.0f, -1.0f, 1.0f }; // Field: light_direction.
   light_direction_ubo.reset(new UniformBuffer(
     light_direction.size() * sizeof(GLfloat), light_direction.data()));
   bindUniformBuffer(*phong_yuv, "LightDirection", *light_direction_ubo);

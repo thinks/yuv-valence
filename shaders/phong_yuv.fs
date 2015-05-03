@@ -26,7 +26,7 @@ void main(void)
   vec4 rgb = vec4(rgb_from_yuv * yuv_gs, 1.0);
 
   vec3 frag_normal = normalize(world_normal);
-  vec3 frag_light_direction = normalize(-light_direction.xyz);
+  vec3 frag_light_direction = -normalize(light_direction.xyz);
 
   float diffuse = max(dot(frag_normal, frag_light_direction), 0.0);
 
