@@ -1,4 +1,5 @@
 #include <array>
+#include <cstdlib>
 #include <exception>
 #include <iostream>
 #include <vector>
@@ -6,9 +7,11 @@
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
 #include <nDjinn.hpp>
+#include <thx.hpp>
 
 using namespace std;
 using namespace ndj;
+using namespace thx;
 
 GLFWwindow* win = nullptr;
 int winWidth = 480;
@@ -25,31 +28,25 @@ unique_ptr<ArrayBuffer> obj_pos_vbo;
 unique_ptr<ArrayBuffer> yuv_vbo;
 unique_ptr<ElementArrayBuffer> tri_index_ibo;
 
-template <typename T>
-struct Vec3 {
-  Vec3(const T x, const T y, const T z) : x(x), y(y), z(z) {}
-  T x;
-  T y;
-  T z;
+typedef vec<2, GLfloat> Vec2f;
+typedef vec<3, GLfloat> Vec3f;
+typedef vec<3, GLushort> Vec3us;
+
+GLfloat triangleArea(const Vec3f& v0, const Vec3f& v1, const Vec3f& v2) {
+  return 0.5f * thx::mag(cross(v2 - v0, v2 - v1));
+}
+
+Vec3f triangleCenter(const Vec3f& v0, const Vec3f& v1, const Vec3f& v2) {
+  return (1.0f / 3) * (v0 + v1 + v2);
+}
+
+struct Triangle {
+  Triangle(const GLushort i, const GLushort j, const GLushort k)
+    : i(i), j(j), k(k) {}
+  GLushort i;
+  GLushort j;
+  GLushort k;
 };
-
-typedef Vec3<GLfloat> Vec3f;
-typedef Vec3<GLushort> Vec3us;
-
-template <typename T> inline
-Vec3<T> cross(const Vec3<T>& u, const Vec3<T>& v)
-{
-  return Vec3<T>(
-    u.y * v.z - u.z * v.y,
-    u.z * v.x - u.x * v.z,
-    u.x * v.y - u.y * v.x);
-}
-
-template <typename T> inline
-Vec3<T> operator-(const Vec3<T>& u, const Vec3<T>& v)
-{
-  return Vec3<T>(u.x - v.x, u.y - v.y, u.z - v.z);
-}
 
 //! DOCS
 void framebufferSizeCallback(GLFWwindow* win,
@@ -196,7 +193,7 @@ void makeGrid(const GLfloat x_min, const GLfloat y_min, const GLfloat z_min,
               const int nx, const int ny,
               vector<Vec3f>* obj_pos,
               vector<Vec3f>* yuv,
-              vector<Vec3us>* tri_index)
+              vector<Triangle>* tri_index)
 {
   const GLfloat x_dim = x_max - x_min;
   const GLfloat y_dim = y_max - y_min;
@@ -208,6 +205,8 @@ void makeGrid(const GLfloat x_min, const GLfloat y_min, const GLfloat z_min,
   const GLfloat y = 0.5f; // TMP
   const GLfloat du = u_dim / nx;
   const GLfloat dv = v_dim / ny;
+
+  srand(0);
 
   obj_pos->push_back(Vec3f(x_min, y_min, 0.0f));
   obj_pos->push_back(Vec3f(x_max, y_min, 0.0f));
@@ -221,10 +220,38 @@ void makeGrid(const GLfloat x_min, const GLfloat y_min, const GLfloat z_min,
   yuv->push_back(Vec3f(0.5f, u_min, v_max));
   yuv->push_back(Vec3f(0.5f, u_min + 0.5f * u_dim, v_min + 0.5f * v_dim));
 
-  tri_index->push_back(Vec3us(4, 0, 1));
-  tri_index->push_back(Vec3us(4, 1, 2));
-  tri_index->push_back(Vec3us(4, 2, 3));
-  tri_index->push_back(Vec3us(4, 3, 0));
+  auto triangle_sorter =
+    [&](Triangle a, Triangle b) -> bool {
+      vector<Vec3f>& vtx = *obj_pos;
+      return triangleArea(vtx[a.i], vtx[a.j], vtx[a.k]) <
+             triangleArea(vtx[b.i], vtx[b.j], vtx[b.k]);
+    };
+
+  vector<Triangle> triangles;
+  triangles.push_back(Triangle(4, 0, 1));
+  triangles.push_back(Triangle(4, 1, 2));
+  triangles.push_back(Triangle(4, 2, 3));
+  triangles.push_back(Triangle(4, 3, 0));
+  sort(triangles.begin(), triangles.end(), triangle_sorter);
+
+  vector<Vec3f>& vtx = *obj_pos;
+  vector<Vec3f>& tex = *yuv;
+  for (int n = 0; n < 64; ++n) {
+    Triangle t = triangles.back();
+    triangles.pop_back();
+    Vec3f c = triangleCenter(vtx[t.i], vtx[t.j], vtx[t.k]);
+    Vec3f ct = triangleCenter(tex[t.i], tex[t.j], tex[t.k]);
+    c[2] = 0.5f; // TMP
+    vtx.push_back(c);
+    tex.push_back(ct);
+    GLushort ci = vtx.size() - 1;
+    triangles.push_back(Triangle(ci, t.i, t.j));
+    triangles.push_back(Triangle(ci, t.j, t.k));
+    triangles.push_back(Triangle(ci, t.k, t.i));
+    sort(triangles.begin(), triangles.end(), triangle_sorter);
+  }
+
+  *tri_index = triangles;
 
 #if 0
   const GLfloat yuv[13 * 3] = {
@@ -321,6 +348,8 @@ void makeGrid(const GLfloat x_min, const GLfloat y_min, const GLfloat z_min,
 
 void initScene()
 {
+  buildShaderPrograms();
+
   const GLfloat x_min = -10.0f;
   const GLfloat y_min = -10.0f;
   const GLfloat z_min = -10.0f;
@@ -397,7 +426,7 @@ void initScene()
 
   vector<Vec3f> obj_pos;
   vector<Vec3f> yuv;
-  vector<Vec3us> tri_index;
+  vector<Triangle> tri_index;
 
   makeGrid(x_min, y_min, z_min,
            x_max, y_max, z_max,
@@ -411,7 +440,7 @@ void initScene()
   yuv_vbo.reset(new ArrayBuffer(
     yuv.size() * sizeof(Vec3f), &yuv[0]));
   tri_index_ibo.reset(new ElementArrayBuffer(
-    tri_index.size() * sizeof(Vec3us), &tri_index[0]));
+    tri_index.size() * sizeof(Triangle), &tri_index[0]));
 
   // Create vertex array to remember bindings.
   phong_yuv_va.reset(new VertexArray);
@@ -461,7 +490,7 @@ void initScene()
 #endif
 }
 
-void render()
+void renderScene()
 {
   clear(GL_COLOR_BUFFER_BIT);
 
@@ -482,22 +511,16 @@ void render()
 
 int main(int argc, char* argv[])
 {
-  using namespace std;
-  using namespace ndj;
-
   try {
 
     initGLFW(winWidth, winHeight);
     initGLEW();
     initGL();
-
-    buildShaderPrograms();
-
     initScene();
 
     while (!glfwWindowShouldClose(win))
     {
-      render();
+      renderScene();
 
       // Swap front and back buffers
       // Poll for and process events
