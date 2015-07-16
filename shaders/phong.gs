@@ -4,47 +4,33 @@ layout(triangles) in;
 layout(triangle_strip, max_vertices = 3) out;
 
 layout(std140) uniform Camera {
-  mat4 viewMatrix;
-  mat4 projectionMatrix;
+  mat4 view_from_world;
+  mat4 clip_from_view;
 };
 
 layout(std140) uniform Model {
-  mat4 modelMatrix;
-  mat4 normalMatrix;
+  mat4 world_from_obj;
+  mat4 world_from_obj_normal;
 };
 
-layout(std140) uniform LightPosition {
-  vec4 lightPosition;
-};
+flat out vec3 world_normal;
 
-in vec4 tex2_vs[];
+void main(void)
+{
+  vec3 obj_pos0 = gl_in[0].gl_Position.xyz;
+  vec3 obj_pos1 = gl_in[1].gl_Position.xyz;
+  vec3 obj_pos2 = gl_in[2].gl_Position.xyz;
 
-//smooth out vec3 viewDirection;
-//smooth out vec3 lightDirection;
-flat out vec3 viewDirection;
-flat out vec3 lightDirection;
-flat out vec3 viewNormal;
-smooth out vec4 tex2_gs;
-
-void 
-main(void) {
   // Per-face normal. Same for all vertices of the emitted triangle.
-  vec3 normal = cross(
-    gl_in[1].gl_Position.xyz - gl_in[0].gl_Position.xyz, 
-    gl_in[2].gl_Position.xyz - gl_in[0].gl_Position.xyz);
-  mat4 viewModelMatrix = viewMatrix*modelMatrix;
+  vec3 obj_normal = cross(obj_pos0 - obj_pos1, obj_pos2 - obj_pos1);
+  world_normal = normalize(mat3(world_from_obj_normal) * obj_normal);
 
-  vec4 lightViewPosition = viewMatrix * lightPosition;
-  viewNormal = mat3(normalMatrix) * normal;
+  mat4 clip_from_obj = clip_from_view * view_from_world * world_from_obj;
 
   int i;
-  vec4 viewPosition;
   for (i = 0; i < gl_in.length(); ++i) {
-    viewPosition = viewModelMatrix * gl_in[i].gl_Position;
-    lightDirection = lightViewPosition.xyz - viewPosition.xyz;
-    viewDirection = -viewPosition.xyz;
-    tex2_gs = tex2_vs[i];
-    gl_Position = projectionMatrix * viewPosition; // Clip space.
+    vec4 clip_pos = clip_from_obj * gl_in[i].gl_Position;
+    gl_Position = clip_pos;
     EmitVertex();	
   }
   EndPrimitive();

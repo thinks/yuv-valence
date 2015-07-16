@@ -1,10 +1,7 @@
 #version 420 core 
 
-in vec3 position; // object space vertex coordinates.
-in vec2 tex2;
-out vec2 tex2_vs;
+in vec3 obj_pos; // object space vertex coordinates.
 
 void main(void) {
-  tex2_vs = tex2;
-  gl_Position = vec4(position, 1.0);
+  gl_Position = vec4(obj_pos, 1.0);
 }

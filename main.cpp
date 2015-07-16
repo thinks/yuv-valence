@@ -1,13 +1,18 @@
 #include <array>
 #include <cstdlib>
 #include <exception>
+#include <fstream>
 #include <iostream>
+#include <random>
 #include <vector>
 
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
 #include <nDjinn.hpp>
 #include <thx.hpp>
+#include <thinks/poissonDiskSampling.hpp>
+
+#include "triangle/triangle.h"
 
 using namespace std;
 using namespace ndj;
@@ -41,12 +46,27 @@ Vec3f triangleCenter(const Vec3f& v0, const Vec3f& v1, const Vec3f& v2) {
 }
 
 struct Triangle {
+  Triangle() : i(0), j(0), k(0) {}
   Triangle(const GLushort i, const GLushort j, const GLushort k)
     : i(i), j(j), k(k) {}
   GLushort i;
   GLushort j;
   GLushort k;
 };
+
+void writeObj(const string& filename,
+              const vector<Vec3f>& vtx,
+              const vector<Triangle>& tris)
+{
+  ofstream ofs(filename);
+  for (size_t v = 0; v < vtx.size(); ++v) {
+    ofs << "v " << vtx[v][0] << " " << vtx[v][1] << " " << vtx[v][2] << endl;
+  }
+  ofs << endl;
+  for (size_t t = 0; t < tris.size(); ++t) {
+    ofs << "f " << tris[t].i + 1 << " " << tris[t].j + 1 << " " << tris[t].k + 1 << endl;
+  }
+}
 
 //! DOCS
 void framebufferSizeCallback(GLFWwindow* win,
@@ -186,164 +206,141 @@ void buildShaderPrograms()
   cout << "Phong:" << endl << *phong_yuv << endl;
 }
 
-void makeGrid(const GLfloat x_min, const GLfloat y_min, const GLfloat z_min,
+void triangulate(const vector<Vec2f>& pos, vector<Triangle>* tri_index)
+{
+  using namespace std;
+  triangulateio triangulate_in;
+  triangulate_in.pointlist = reinterpret_cast<REAL*>(
+    malloc(pos.size() * 2 * sizeof(REAL)));
+  triangulate_in.pointattributelist = nullptr;
+  triangulate_in.pointmarkerlist = nullptr;
+  triangulate_in.numberofpoints = static_cast<int>(pos.size());
+  triangulate_in.numberofpointattributes = 0;
+  triangulate_in.trianglelist = nullptr;
+  triangulate_in.triangleattributelist = nullptr;
+  triangulate_in.trianglearealist = nullptr;
+  triangulate_in.numberoftriangles = 0;
+  triangulate_in.numberofcorners = 0;
+  triangulate_in.numberoftriangleattributes = 0;
+  triangulate_in.segmentlist = nullptr;
+  triangulate_in.segmentmarkerlist = nullptr;
+  triangulate_in.numberofsegments = 0;
+  triangulate_in.holelist = nullptr;
+  triangulate_in.numberofholes = 0;
+  triangulate_in.regionlist = nullptr;
+  triangulate_in.numberofregions = 0;
+
+  for (size_t i = 0; i < pos.size(); ++i) {
+    triangulate_in.pointlist[i * 2 + 0] = pos[i][0];
+    triangulate_in.pointlist[i * 2 + 1] = pos[i][1];
+  }
+
+  triangulateio triangulate_out;
+  triangulate_out.pointlist = nullptr; // Not needed if -N switch used.
+  triangulate_out.pointattributelist = nullptr; // Not needed if -N switch used or number of point attributes is zero.
+  triangulate_out.pointmarkerlist = nullptr; // Not needed if -N or -B switch used.
+  triangulate_out.trianglelist = NULL; // Not needed if -E switch used.
+  triangulate_out.triangleattributelist = nullptr; // Not needed if -E switch used or number of triangle attributes is zero.
+  triangulate_out.neighborlist = nullptr; // Needed only if -n switch used.
+  triangulate_out.segmentlist = nullptr; // Needed only if segments are output (-p or -c) and -P not used:
+  triangulate_out.segmentmarkerlist = nullptr;   // Needed only if segments are output (-p or -c) and -P and -B not used:
+  triangulate_out.edgelist = nullptr; // Needed only if -e switch used.
+  triangulate_out.edgemarkerlist = nullptr; // Needed if -e used and -B not used.
+  triangulate_out.normlist = nullptr;
+
+  vector<char> triangulate_flags;
+  triangulate_flags.push_back('P'); // Suppresses the output .poly file.
+  triangulate_flags.push_back('N'); // Suppresses the output .node file.
+  //triangulate_flags.push_back('E'); // Suppresses the output .ele file.
+  triangulate_flags.push_back('c');
+  triangulate_flags.push_back('Q'); // Quiet.
+  triangulate_flags.push_back('z'); // Zero-based indexing.
+  triangulate_flags.push_back('\0'); // Null-termination.
+
+  triangulate(
+    triangulate_flags.data(),
+    &triangulate_in,
+    &triangulate_out,
+    nullptr);
+
+  assert(tri_index != nullptr);
+  tri_index->clear();
+  tri_index->resize(triangulate_out.numberoftriangles);
+  assert(triangulate_out.numberofcorners == 3);
+  for (int t = 0; t < triangulate_out.numberoftriangles; ++t) {
+    (*tri_index)[t].i = triangulate_out.trianglelist[3 * t + 0];
+    (*tri_index)[t].j = triangulate_out.trianglelist[3 * t + 1];
+    (*tri_index)[t].k = triangulate_out.trianglelist[3 * t + 2];
+  }
+
+  // Free all allocated arrays, including those allocated by Triangle.
+  free(triangulate_in.pointlist);
+  free(triangulate_out.pointlist);
+  free(triangulate_in.pointattributelist);
+  free(triangulate_out.pointattributelist);
+  free(triangulate_in.pointmarkerlist);
+  free(triangulate_out.pointmarkerlist);
+  free(triangulate_in.trianglelist);
+  free(triangulate_out.trianglelist);
+  free(triangulate_in.triangleattributelist);
+  free(triangulate_out.triangleattributelist);
+  free(triangulate_in.trianglearealist); // In only.
+  free(triangulate_out.neighborlist); // Out only.
+  free(triangulate_in.segmentlist);
+  free(triangulate_out.segmentlist);
+  free(triangulate_in.segmentmarkerlist);
+  free(triangulate_out.segmentmarkerlist);
+  free(triangulate_in.holelist); // In only.
+  free(triangulate_in.regionlist); // In only.
+  free(triangulate_out.edgelist); // Out only.
+  free(triangulate_out.edgemarkerlist); // Out only.
+  free(triangulate_out.normlist); // Out only.
+}
+
+void makeMesh(const GLfloat x_min, const GLfloat y_min, const GLfloat z_min,
               const GLfloat x_max, const GLfloat y_max, const GLfloat z_max,
               const GLfloat u_min, const GLfloat u_max,
               const GLfloat v_min, const GLfloat v_max,
-              const int nx, const int ny,
+              const GLfloat radius,
+              const uint32_t seed,
               vector<Vec3f>* obj_pos,
               vector<Vec3f>* yuv,
               vector<Triangle>* tri_index)
 {
-  const GLfloat x_dim = x_max - x_min;
-  const GLfloat y_dim = y_max - y_min;
-  const GLfloat dx = x_dim / nx;
-  const GLfloat dy = y_dim / ny;
-  const GLfloat z = 0.0f; // TMP
-  const GLfloat u_dim = u_max - u_min;
-  const GLfloat v_dim = v_max - v_min;
-  const GLfloat y = 0.5f; // TMP
-  const GLfloat du = u_dim / nx;
-  const GLfloat dv = v_dim / ny;
-
-  srand(0);
-
-  obj_pos->push_back(Vec3f(x_min, y_min, 0.0f));
-  obj_pos->push_back(Vec3f(x_max, y_min, 0.0f));
-  obj_pos->push_back(Vec3f(x_max, y_max, 0.0f));
-  obj_pos->push_back(Vec3f(x_min, y_max, 0.0f));
-  obj_pos->push_back(Vec3f(x_min + 0.5f * x_dim, y_min + 0.5f * y_dim, 0.0f));
-
-  yuv->push_back(Vec3f(0.5f, u_min, v_min));
-  yuv->push_back(Vec3f(0.5f, u_max, v_min));
-  yuv->push_back(Vec3f(0.5f, u_max, v_max));
-  yuv->push_back(Vec3f(0.5f, u_min, v_max));
-  yuv->push_back(Vec3f(0.5f, u_min + 0.5f * u_dim, v_min + 0.5f * v_dim));
-
-  auto triangle_sorter =
-    [&](Triangle a, Triangle b) -> bool {
-      vector<Vec3f>& vtx = *obj_pos;
-      return triangleArea(vtx[a.i], vtx[a.j], vtx[a.k]) <
-             triangleArea(vtx[b.i], vtx[b.j], vtx[b.k]);
-    };
-
-  vector<Triangle> triangles;
-  triangles.push_back(Triangle(4, 0, 1));
-  triangles.push_back(Triangle(4, 1, 2));
-  triangles.push_back(Triangle(4, 2, 3));
-  triangles.push_back(Triangle(4, 3, 0));
-  sort(triangles.begin(), triangles.end(), triangle_sorter);
-
-  vector<Vec3f>& vtx = *obj_pos;
-  vector<Vec3f>& tex = *yuv;
-  for (int n = 0; n < 64; ++n) {
-    Triangle t = triangles.back();
-    triangles.pop_back();
-    Vec3f c = triangleCenter(vtx[t.i], vtx[t.j], vtx[t.k]);
-    Vec3f ct = triangleCenter(tex[t.i], tex[t.j], tex[t.k]);
-    c[2] = 0.5f; // TMP
-    vtx.push_back(c);
-    tex.push_back(ct);
-    GLushort ci = vtx.size() - 1;
-    triangles.push_back(Triangle(ci, t.i, t.j));
-    triangles.push_back(Triangle(ci, t.j, t.k));
-    triangles.push_back(Triangle(ci, t.k, t.i));
-    sort(triangles.begin(), triangles.end(), triangle_sorter);
+  assert(obj_pos != nullptr);
+  assert(yuv != nullptr);
+  const array<GLfloat, 2> sampling_min = { x_min - 2.f * radius,
+                                           y_min - 2.f * radius };
+  const array<GLfloat, 2> sampling_max = { x_max + 2.f * radius,
+                                           y_max + 2.f * radius};
+  const vector<array<GLfloat, 2>> samples =
+    thinks::poissonDiskSampling(radius, sampling_min, sampling_max, 30, seed);
+  vector<Vec2f> obj_pos_xy(samples.size());
+  for (size_t i = 0; i < samples.size(); ++i) {
+    obj_pos_xy[i][0] = samples[i][0];
+    obj_pos_xy[i][1] = samples[i][1];
   }
 
-  *tri_index = triangles;
+  triangulate(obj_pos_xy, tri_index);
 
-#if 0
-  const GLfloat yuv[13 * 3] = {
-    0.5f, u_min, v_min,
-    0.5f, u_mid, v_min,
-    0.5f, u_max, v_min,
-    0.5f, 0.25f * (u_min + u_max), 0.25f * (v_min + v_max),
-    0.5f, 0.75f * (u_min + u_max), 0.25f * (v_min + v_max),
-    0.5f, u_min, v_mid,
-    0.5f, u_mid, v_mid,
-    0.5f, u_max, v_mid,
-    0.5f, 0.25f * (u_min + u_max), 0.75f * (v_min + v_max),
-    0.5f, 0.75f * (u_min + u_max), 0.75f * (v_min + v_max),
-    0.5f, u_min, v_max,
-    0.5f, u_mid, v_max,
-    0.5f, u_max, v_max,};
-  yuv_vbo.reset(new ArrayBuffer(13 * 3 * sizeof(GLfloat), yuv));
-
-  //const GLfloat obj_pos[5 * 3] = {
-  //  y_min, y_min, 0.0f,
-  //  y_min, y_max, -8.0f,
-  //  y_max, y_max, -5.0f,
-  //  y_max, y_min, 0.0f,
-  //  -5.0f, -5.0f, -5.0f };
-
-  const GLushort index[4 * 3] = {
-    4, 0, 1,
-    4, 1, 2,
-    4, 2, 3,
-    4, 3, 0 };
-  index_vbo.reset(new ElementArrayBuffer(4 * 3 * sizeof(GLushort), index));
-  cout << "index count: "
-       << static_cast<GLsizei>(index_vbo->sizeInBytes() / sizeof(GLushort))
-       << endl;
-  cout << "triangle count: "
-       << static_cast<GLsizei>(index_vbo->sizeInBytes() / sizeof(GLushort)) / 3
-       << endl;
-#endif
-
-
-
-#if 0
-  vector<GLfloat> obj_pos;
-  vector<GLfloat> yuv;
-
-  // Grid.
-  for (int gy = 0; gy <= ny; ++gy) {
-    for (int gx = 0; gx <= nx; ++gx) {
-      obj_pos.push_back(x_min + gx * dx);
-      obj_pos.push_back(y_min + gy * dy);
-      obj_pos.push_back(z);
-      yuv.push_back(y);
-      yuv.push_back(u_min + gx * du);
-      yuv.push_back(v_min + gy * dv);
-    }
+  // Compute triangle vertices in 3D, adding a random offset in Z.
+  random_device rd;
+  mt19937 gen(rd());
+  uniform_real_distribution<GLfloat> dis(z_min, z_max);
+  obj_pos->clear();
+  obj_pos->resize(obj_pos_xy.size());
+  yuv->clear();
+  yuv->resize(samples.size());
+  for (size_t i = 0; i < obj_pos_xy.size(); ++i) {
+    (*obj_pos)[i][0] = obj_pos_xy[i][0];
+    (*obj_pos)[i][1] = obj_pos_xy[i][1];
+    (*obj_pos)[i][2] = dis(gen);
+    const GLfloat tu = ((*obj_pos)[i][0] - x_min) / (x_max - x_min);
+    const GLfloat tv = ((*obj_pos)[i][1] - y_min) / (y_max - y_min);
+    (*yuv)[i][0] = 0.5f;
+    (*yuv)[i][1] = u_min + (u_max - u_min) * tu;
+    (*yuv)[i][2] = v_min + (v_max - v_min) * tv;
   }
-
-  cout << "grid vertices: " << obj_pos.size() / 3 << endl;
-
-  vector<GLushort> tri_indices;
-  int pivot_index = 0;
-
-  // Pivots.
-  for (int py = 0; py < ny; ++py) {
-    for (int px = 0; px < nx; ++px) {
-      obj_pos.push_back(x_min + (px + 0.5f) * dx);
-      obj_pos.push_back(y_min + (py + 0.5f) * dy);
-      obj_pos.push_back(z);
-      yuv.push_back(y);
-      yuv.push_back(u_min + (px + 0.5f) * du);
-      yuv.push_back(v_min + (py + 0.5f) * dv);
-
-      tri_indices.push_back(pivot_index);
-      tri_indices.push_back(ix);
-      tri_indices.push_back(ix + 1);
-
-      tri_indices.push_back(pivot_index,);
-      tri_indices.push_back(ix);
-      tri_indices.push_back();
-
-      tri_indices.push_back(pivot_index,);
-      tri_indices.push_back();
-      tri_indices.push_back();
-
-      tri_indices.push_back(pivot_index,);
-      tri_indices.push_back();
-      tri_indices.push_back();
-
-      ++pivot_index;
-    }
-  }
-#endif
 }
 
 void initScene()
@@ -352,14 +349,16 @@ void initScene()
 
   const GLfloat x_min = -10.0f;
   const GLfloat y_min = -10.0f;
-  const GLfloat z_min = -10.0f;
+  const GLfloat z_min = -1.0f;
   const GLfloat x_max = 10.0f;
   const GLfloat y_max = 10.0f;
-  const GLfloat z_max = 10.0f;
+  const GLfloat z_max = 1.0f;
   const GLfloat u_min = -0.436f;
   const GLfloat u_max =  0.436f;
   const GLfloat v_min = -0.615f;
   const GLfloat v_max =  0.615f;
+  const GLfloat radius = 2.f;
+  const uint32_t seed = 1981;
 
   // --------------------------
   // Initialize uniform blocks.
@@ -392,7 +391,7 @@ void initScene()
   bindUniformBuffer(*phong_yuv, "LightColor", *light_color_ubo);
 
   // Light direction.
-  const array<GLfloat, 1* 4> light_direction = {
+  const array<GLfloat, 1 * 4> light_direction = {
     0.0f, 0.0f, -1.0f, 1.0f }; // Field: light_direction.
   light_direction_ubo.reset(new UniformBuffer(
     light_direction.size() * sizeof(GLfloat), light_direction.data()));
@@ -427,13 +426,13 @@ void initScene()
   vector<Vec3f> obj_pos;
   vector<Vec3f> yuv;
   vector<Triangle> tri_index;
-
-  makeGrid(x_min, y_min, z_min,
+  makeMesh(x_min, y_min, z_min,
            x_max, y_max, z_max,
            u_min, u_max,
            v_min, v_max,
-           2, 2,
+           radius, seed,
            &obj_pos, &yuv, &tri_index);
+  writeObj("mesh.obj", obj_pos, tri_index); // TMP!!
 
   obj_pos_vbo.reset(new ArrayBuffer(
     obj_pos.size() * sizeof(Vec3f), &obj_pos[0]));
@@ -512,7 +511,6 @@ void renderScene()
 int main(int argc, char* argv[])
 {
   try {
-
     initGLFW(winWidth, winHeight);
     initGLEW();
     initGL();

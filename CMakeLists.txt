@@ -12,15 +12,17 @@ MESSAGE(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
 # Project Compiler Flags
 #ADD_DEFINITIONS(-Wall -Wextra)
 
-SET(fstudio_HEADERS
+SET(yuv-valence_HEADERS
   Camera.hpp
   Color.hpp
   Light.hpp
   Material.hpp
+  triangle/triangle.h
 )
 
-SET(fstudio_SOURCES
+SET(yuv-valence_SOURCES
   main.cpp
+  triangle/triangle.c
 )
 
 MESSAGE(STATUS "GLEW_PATH: $ENV{GLEW_PATH}")
@@ -34,16 +36,18 @@ INCLUDE_DIRECTORIES(
   $ENV{GLEW_PATH}/include
   $ENV{GLFW_PATH}/include
   $ENV{NDJINN_PATH}/include
-  $ENV{THX_PATH}/include)
+  $ENV{THX_PATH}/include
+  # TMP!!
+  ../poisson-disk-sampling/include)
 
 LINK_DIRECTORIES(
   $ENV{GLEW_PATH}/lib)
 
-ADD_DEFINITIONS(-DGLEW_STATIC)
+ADD_DEFINITIONS(-DGLEW_STATIC -DTRILIBRARY -DNO_TIMER)
 
 ADD_EXECUTABLE(yuv-valence
-  ${fstudio_SOURCES}
-  ${fstudio_HEADERS})
+  ${yuv-valence_SOURCES}
+  ${yuv-valence_HEADERS})
 
 TARGET_LINK_LIBRARIES(yuv-valence
   ${OPENGL_LIBRARIES}

@@ -31,6 +31,12 @@ void main(void)
 
   mat4 clip_from_obj = clip_from_view * view_from_world * world_from_obj;
 
+  //yuv_gs = (yuv_vs[0] + yuv_vs[1] + yuv_vs[2]) / 3.0;
+  yuv_gs.x = 0.5;
+  yuv_gs.y = (yuv_vs[0].y + yuv_vs[1].y + yuv_vs[2].y) / 3.0;
+  //yuv_gs.z = (yuv_vs[0].z + yuv_vs[1].z + yuv_vs[2].z) / 3.0;
+
+
   yuv_gs = yuv_vs[0];
   gl_Position = clip_from_obj * obj_pos0;
   EmitVertex();
