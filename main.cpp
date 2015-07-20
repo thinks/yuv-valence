@@ -32,20 +32,22 @@ unique_ptr<UniformBuffer> model_ubo;
 unique_ptr<ArrayBuffer> obj_pos_vbo;
 unique_ptr<ArrayBuffer> yuv_vbo;
 unique_ptr<ElementArrayBuffer> tri_index_ibo;
+unique_ptr<Framebuffer> fbo;
 
 typedef vec<2, GLfloat> Vec2f;
 typedef vec<3, GLfloat> Vec3f;
 typedef vec<3, GLushort> Vec3us;
 
 GLfloat triangleArea(const Vec3f& v0, const Vec3f& v1, const Vec3f& v2) {
-  return 0.5f * thx::mag(cross(v2 - v0, v2 - v1));
+  return 0.5f * mag(cross(v2 - v0, v2 - v1));
 }
 
 Vec3f triangleCenter(const Vec3f& v0, const Vec3f& v1, const Vec3f& v2) {
   return (1.0f / 3) * (v0 + v1 + v2);
 }
 
-struct Triangle {
+struct Triangle
+{
   Triangle() : i(0), j(0), k(0) {}
   Triangle(const GLushort i, const GLushort j, const GLushort k)
     : i(i), j(j), k(k) {}
@@ -54,8 +56,18 @@ struct Triangle {
   GLushort k;
 };
 
-void writeObj(const string& filename,
-              const vector<Vec3f>& vtx,
+struct Pixel
+{
+  Pixel() : r(0), g(0), b(0), a(0) {}
+  Pixel(const GLubyte r, const GLubyte g, const GLubyte b)
+    : r(r), g(g), b(b), a(0) {}
+  GLubyte r;
+  GLubyte g;
+  GLubyte b;
+  GLubyte a;
+};
+
+void writeObj(const string& filename, const vector<Vec3f>& vtx,
               const vector<Triangle>& tris)
 {
   ofstream ofs(filename);
@@ -66,6 +78,20 @@ void writeObj(const string& filename,
   for (size_t t = 0; t < tris.size(); ++t) {
     ofs << "f " << tris[t].i + 1 << " " << tris[t].j + 1 << " " << tris[t].k + 1 << endl;
   }
+  ofs.close();
+}
+
+void writePpm(const string& filename, size_t width, size_t height,
+              const vector<Pixel>& pixels)
+{
+  ofstream ofs(filename);
+  ofs << "P6" << endl;
+  ofs << width << " " << height << endl;
+  ofs << 255 << endl;
+  for (size_t p = 0; p < pixels.size(); ++p) {
+    ofs << pixels[p].r << " " << pixels[p].g << " " << pixels[p].b << endl;
+  }
+  ofs.close();
 }
 
 //! DOCS
@@ -239,7 +265,7 @@ void triangulate(const vector<Vec2f>& pos, vector<Triangle>* tri_index)
   triangulate_out.pointlist = nullptr; // Not needed if -N switch used.
   triangulate_out.pointattributelist = nullptr; // Not needed if -N switch used or number of point attributes is zero.
   triangulate_out.pointmarkerlist = nullptr; // Not needed if -N or -B switch used.
-  triangulate_out.trianglelist = NULL; // Not needed if -E switch used.
+  triangulate_out.trianglelist = nullptr; // Not needed if -E switch used.
   triangulate_out.triangleattributelist = nullptr; // Not needed if -E switch used or number of triangle attributes is zero.
   triangulate_out.neighborlist = nullptr; // Needed only if -n switch used.
   triangulate_out.segmentlist = nullptr; // Needed only if segments are output (-p or -c) and -P not used:
@@ -357,8 +383,8 @@ void initScene()
   const GLfloat u_max =  0.436f;
   const GLfloat v_min = -0.615f;
   const GLfloat v_max =  0.615f;
-  const GLfloat radius = 2.f;
-  const uint32_t seed = 1981;
+  const GLfloat radius = 1.5f;
+  const uint32_t seed = 1954;
 
   // --------------------------
   // Initialize uniform blocks.
@@ -473,6 +499,40 @@ void initScene()
   const Bindor<ElementArrayBuffer> tri_index_bindor(*tri_index_ibo);
   phong_yuv_va->release();
 
+  // ----------------------
+  // Create framebuffer.
+  // ----------------------
+
+#if 1 // TMP, use ndj::Texture2D!!
+  GLuint color_tex;
+  glGenTextures(1, &color_tex);
+  glBindTexture(GL_TEXTURE_2D, color_tex);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+  //NULL means reserve texture memory, but texels are undefined
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 256, 256, 0, GL_BGRA,
+               GL_UNSIGNED_BYTE, NULL);
+  glBindTexture(GL_TEXTURE_2D, 0);
+#endif
+
+  fbo.reset(new Framebuffer);
+  //fbo->attachTexture2D(GL_COLOR_ATTACHMENT0, color_tex, GL_TEXTURE_2D);
+  fbo->attachTexture2D(GL_COLOR_ATTACHMENT0, color_tex);
+  cout << *fbo << endl;
+  fbo->detachTexture1D(GL_COLOR_ATTACHMENT0);
+  cout << *fbo << endl;
+  fbo->attachTexture2D(GL_COLOR_ATTACHMENT1, color_tex);
+  cout << *fbo << endl;
+
+  Renderbuffer rbo(GL_RGBA8, 256, 256);
+  cout << rbo << endl;
+  fbo->attachRenderbuffer(GL_COLOR_ATTACHMENT2, rbo.handle());
+  cout << *fbo << endl;
+  fbo->detachTexture2D(GL_COLOR_ATTACHMENT2, rbo.handle());
+  cout << *fbo << endl;
+
 #if 1
   cout << "obj_pos count: "
        << obj_pos_vbo->sizeInBytes() / sizeof(Vec3f)
@@ -525,6 +585,12 @@ int main(int argc, char* argv[])
       glfwSwapBuffers(win);
       glfwPollEvents();
     }
+
+    vector<Pixel> pixels(winWidth * winHeight);
+    glReadBuffer(GL_FRONT);
+    glReadPixels(0, 0, winWidth, winHeight, GL_RGBA, GL_UNSIGNED_BYTE,
+                 pixels.data());
+    writePpm("framebuffer.ppm", winWidth, winHeight, pixels);
 
     // Close window and terminate GLFW.
     glfwDestroyWindow(win);
