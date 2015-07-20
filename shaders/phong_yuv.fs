@@ -15,7 +15,7 @@ layout(std140) uniform LightDirection {
 flat in vec3 world_normal;
 smooth in vec3 yuv_gs;
 
-out vec4 frag_color;
+layout(location = 0) out vec4 frag_color;
 
 void main(void)
 {
@@ -32,4 +32,6 @@ void main(void)
 
   frag_color = rgb *
     (diffuse * (light_diffuse_color * material_front_diffuse_color));
+  //gl_FragData[0] = rgb *
+  //  (diffuse * (light_diffuse_color * material_front_diffuse_color));
 }

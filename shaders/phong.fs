@@ -22,8 +22,9 @@ void main(void) {
 
   float diffuse = max(dot(frag_normal, frag_light_direction), 0.0);
 
-  fragColor =
-    diffuse * (light_diffuse_color * material_front_diffuse_color);
+  //fragColor =
+  //  diffuse * (light_diffuse_color * material_front_diffuse_color);
+  gl_Fragdata[0] = diffuse * (light_diffuse_color * material_front_diffuse_color);
   //fragColor = vec4(abs(fragNormal.xyz), 1.0);
   //fragColor = vec4(vec3(abs(fragNormal.x), abs(fragNormal.y), 0.0), 1.0);
   //fragColor = vec4(vec3(0.0, abs(fragNormal.y), 0.0), 1.0);

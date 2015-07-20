@@ -33,6 +33,7 @@ unique_ptr<ArrayBuffer> obj_pos_vbo;
 unique_ptr<ArrayBuffer> yuv_vbo;
 unique_ptr<ElementArrayBuffer> tri_index_ibo;
 unique_ptr<Framebuffer> fbo;
+unique_ptr<Renderbuffer> rbo;
 
 typedef vec<2, GLfloat> Vec2f;
 typedef vec<3, GLfloat> Vec3f;
@@ -56,16 +57,19 @@ struct Triangle
   GLushort k;
 };
 
+template <typename T>
 struct Pixel
 {
-  Pixel() : r(0), g(0), b(0), a(0) {}
-  Pixel(const GLubyte r, const GLubyte g, const GLubyte b)
-    : r(r), g(g), b(b), a(0) {}
-  GLubyte r;
-  GLubyte g;
-  GLubyte b;
-  GLubyte a;
+  Pixel() : r(0), g(0), b(0) {}
+  Pixel(const T _r, const T _g, const T _b) : r(_r), g(_g), b(_b) {}
+  T r;
+  T g;
+  T b;
 };
+
+typedef Pixel<float> Pixelf;
+typedef Pixel<uint8_t> Pixel8ui;
+
 
 void writeObj(const string& filename, const vector<Vec3f>& vtx,
               const vector<Triangle>& tris)
@@ -82,17 +86,30 @@ void writeObj(const string& filename, const vector<Vec3f>& vtx,
 }
 
 void writePpm(const string& filename, size_t width, size_t height,
-              const vector<Pixel>& pixels)
+              const vector<Pixel8ui>& pixels)
 {
-  ofstream ofs(filename);
+  ofstream ofs(filename, ios_base::out | ios_base::binary | ios_base::trunc);
   ofs << "P6" << endl;
   ofs << width << " " << height << endl;
   ofs << 255 << endl;
-  for (size_t p = 0; p < pixels.size(); ++p) {
-    ofs << pixels[p].r << " " << pixels[p].g << " " << pixels[p].b << endl;
-  }
+  ofs.write(reinterpret_cast<const char*>(pixels.data()),
+            pixels.size() * sizeof(Pixel8ui));
   ofs.close();
 }
+
+void writePpm(const string& filename, size_t width, size_t height,
+              const vector<Pixelf>& pixels)
+{
+  vector<Pixel8ui> pixels8ui(pixels.size());
+  transform(begin(pixels), end(pixels), begin(pixels8ui),
+    [](const Pixelf p) {
+      return Pixel8ui(static_cast<uint8_t>(p.r * 255.f),
+                      static_cast<uint8_t>(p.g * 255.f),
+                      static_cast<uint8_t>(p.b * 255.f));
+    });
+  writePpm(filename, width, height, pixels8ui);
+}
+
 
 //! DOCS
 void framebufferSizeCallback(GLFWwindow* win,
@@ -216,6 +233,14 @@ void initGL()
   GLint maxVertexAttribs = 0;
   getIntegerv(GL_MAX_VERTEX_ATTRIBS, &maxVertexAttribs);
   cout << "GL_MAX_VERTEX_ATTRIBS: " << maxVertexAttribs << "\n";
+
+  GLint max_renderbuffer_size = 0;
+  getIntegerv(GL_MAX_RENDERBUFFER_SIZE, &max_renderbuffer_size);
+  cout << "GL_MAX_RENDERBUFFER_SIZE: " << max_renderbuffer_size << "\n";
+
+  GLint max_draw_buffers = 0;
+  getIntegerv(GL_MAX_DRAW_BUFFERS, &max_draw_buffers);
+  cout << "GL_MAX_DRAW_BUFFERS: " << max_draw_buffers << "\n";
 }
 
 void buildShaderPrograms()
@@ -229,7 +254,7 @@ void buildShaderPrograms()
   phong_yuv->activeUniformBlock("LightDirection").bind(3);
   phong_yuv->activeUniformBlock("Material").bind(4);
   phong_yuv->activeUniformBlock("Model").bind(5);
-  cout << "Phong:" << endl << *phong_yuv << endl;
+  cout << "phong_yuv:" << endl << *phong_yuv << endl;
 }
 
 void triangulate(const vector<Vec2f>& pos, vector<Triangle>* tri_index)
@@ -373,12 +398,12 @@ void initScene()
 {
   buildShaderPrograms();
 
-  const GLfloat x_min = -10.0f;
-  const GLfloat y_min = -10.0f;
-  const GLfloat z_min = -1.0f;
-  const GLfloat x_max = 10.0f;
-  const GLfloat y_max = 10.0f;
-  const GLfloat z_max = 1.0f;
+  const GLfloat x_min = -10.f;
+  const GLfloat y_min = -10.f;
+  const GLfloat z_min = -1.f;
+  const GLfloat x_max = 10.f;
+  const GLfloat y_max = 10.f;
+  const GLfloat z_max = 1.f;
   const GLfloat u_min = -0.436f;
   const GLfloat u_max =  0.436f;
   const GLfloat v_min = -0.615f;
@@ -392,14 +417,14 @@ void initScene()
 
   // Camera.
   array<GLfloat, 2 * 16> camera = {
-    1.0f, 0.0f, 0.0f, 0.0f, // view_from_world matrix, column 0.
-    0.0f, 1.0f, 0.0f, 0.0f,
-    0.0f, 0.0f, 1.0f, 0.0f,
-    0.0f, 0.0f, 0.0f, 1.0f,
-    1.0f, 0.0f, 0.0f, 0.0f, // clip_from_view, column 0.
-    0.0f, 1.0f, 0.0f, 0.0f,
-    0.0f, 0.0f, 1.0f, 0.0f,
-    0.0f, 0.0f, 0.0f, 1.0f };
+    1.f, 0.f, 0.f, 0.f, // view_from_world matrix, column 0.
+    0.f, 1.f, 0.f, 0.f,
+    0.f, 0.f, 1.f, 0.f,
+    0.f, 0.f, 0.f, 1.f,
+    1.f, 0.f, 0.f, 0.f, // clip_from_view, column 0.
+    0.f, 1.f, 0.f, 0.f,
+    0.f, 0.f, 1.f, 0.f,
+    0.f, 0.f, 0.f, 1.f };
   makeOrthographicProjectionMatrix(
     x_min, x_max,
     y_min, y_max,
@@ -411,21 +436,21 @@ void initScene()
 
   // Light color.
   const array<GLfloat, 1 * 4> light_color = {
-    1.0f, 1.0f, 1.0f, 1.0f }; // Field: light_diffuse_color.
+    1.f, 1.f, 1.f, 1.f }; // Field: light_diffuse_color.
   light_color_ubo.reset(new UniformBuffer(
     light_color.size() * sizeof(GLfloat), light_color.data()));
   bindUniformBuffer(*phong_yuv, "LightColor", *light_color_ubo);
 
   // Light direction.
   const array<GLfloat, 1 * 4> light_direction = {
-    0.0f, 0.0f, -1.0f, 1.0f }; // Field: light_direction.
+    0.f, 0.f, -1.f, 1.f }; // Field: light_direction.
   light_direction_ubo.reset(new UniformBuffer(
     light_direction.size() * sizeof(GLfloat), light_direction.data()));
   bindUniformBuffer(*phong_yuv, "LightDirection", *light_direction_ubo);
 
   // Material.
   const array<GLfloat, 1 * 4> material = {
-    1.0f, 1.0f, 1.0f, 1.0f, // Field: front_diffuse.
+    1.f, 1.f, 1.f, 1.f, // Field: front_diffuse.
   };
   material_ubo.reset(new UniformBuffer(
     material.size() * sizeof(GLfloat), material.data()));
@@ -433,14 +458,14 @@ void initScene()
 
   // Model.
   const array<GLfloat, 2 * 16> model = {
-    1.0f, 0.0f, 0.0f, 0.0f, // Field: world_from_obj matrix, column 0.
-    0.0f, 1.0f, 0.0f, 0.0f,
-    0.0f, 0.0f, 1.0f, 0.0f,
-    0.0f, 0.0f, 0.0f, 1.0f,
-    1.0f, 0.0f, 0.0f, 0.0f, // Field: world_from_obj_normal, column 0.
-    0.0f, 1.0f, 0.0f, 0.0f,
-    0.0f, 0.0f, 1.0f, 0.0f,
-    0.0f, 0.0f, 0.0f, 1.0f };
+    1.f, 0.f, 0.f, 0.f, // Field: world_from_obj matrix, column 0.
+    0.f, 1.f, 0.f, 0.f,
+    0.f, 0.f, 1.f, 0.f,
+    0.f, 0.f, 0.f, 1.f,
+    1.f, 0.f, 0.f, 0.f, // Field: world_from_obj_normal, column 0.
+    0.f, 1.f, 0.f, 0.f,
+    0.f, 0.f, 1.f, 0.f,
+    0.f, 0.f, 0.f, 1.f };
   model_ubo.reset(new UniformBuffer(
     model.size() * sizeof(GLfloat), model.data()));
   bindUniformBuffer(*phong_yuv, "Model", *model_ubo);
@@ -458,7 +483,7 @@ void initScene()
            v_min, v_max,
            radius, seed,
            &obj_pos, &yuv, &tri_index);
-  writeObj("mesh.obj", obj_pos, tri_index); // TMP!!
+  //writeObj("mesh.obj", obj_pos, tri_index); // TMP!!
 
   obj_pos_vbo.reset(new ArrayBuffer(
     obj_pos.size() * sizeof(Vec3f), &obj_pos[0]));
@@ -503,36 +528,6 @@ void initScene()
   // Create framebuffer.
   // ----------------------
 
-#if 1 // TMP, use ndj::Texture2D!!
-  GLuint color_tex;
-  glGenTextures(1, &color_tex);
-  glBindTexture(GL_TEXTURE_2D, color_tex);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-  //NULL means reserve texture memory, but texels are undefined
-  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 256, 256, 0, GL_BGRA,
-               GL_UNSIGNED_BYTE, NULL);
-  glBindTexture(GL_TEXTURE_2D, 0);
-#endif
-
-  fbo.reset(new Framebuffer);
-  //fbo->attachTexture2D(GL_COLOR_ATTACHMENT0, color_tex, GL_TEXTURE_2D);
-  fbo->attachTexture2D(GL_COLOR_ATTACHMENT0, color_tex);
-  cout << *fbo << endl;
-  fbo->detachTexture1D(GL_COLOR_ATTACHMENT0);
-  cout << *fbo << endl;
-  fbo->attachTexture2D(GL_COLOR_ATTACHMENT1, color_tex);
-  cout << *fbo << endl;
-
-  Renderbuffer rbo(GL_RGBA8, 256, 256);
-  cout << rbo << endl;
-  fbo->attachRenderbuffer(GL_COLOR_ATTACHMENT2, rbo.handle());
-  cout << *fbo << endl;
-  fbo->detachTexture2D(GL_COLOR_ATTACHMENT2, rbo.handle());
-  cout << *fbo << endl;
-
 #if 1
   cout << "obj_pos count: "
        << obj_pos_vbo->sizeInBytes() / sizeof(Vec3f)
@@ -551,6 +546,9 @@ void initScene()
 
 void renderScene()
 {
+  //viewport(0, 0, winWidth, winHeight);
+  viewport(0, 0, 4092, 4092);
+
   clear(GL_COLOR_BUFFER_BIT);
 
   const Bindor<ShaderProgram> phong_yuv_bindor(*phong_yuv);
@@ -570,27 +568,74 @@ void renderScene()
 
 int main(int argc, char* argv[])
 {
+#if 1
+  {
+    vector<Pixel8ui> img(32 * 32);
+    for (size_t i = 0; i < img.size(); ++i)
+    {
+      img[i] = Pixel8ui(255, 0, 0);
+    }
+    writePpm("test.ppm", 32, 32, img);
+    cout << "wrote test.ppm" << endl;
+  }
+#endif
+
   try {
     initGLFW(winWidth, winHeight);
     initGLEW();
     initGL();
+
+    fbo.reset(new Framebuffer);
+
+    GLuint color_tex;
+    glGenTextures(1, &color_tex);
+    glBindTexture(GL_TEXTURE_2D, color_tex);
+    //glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    //glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    //NULL means reserve texture memory, but texels are undefined
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 4092, 4092, 0, GL_RGB,
+                 GL_UNSIGNED_BYTE, NULL);
+    //glBindTexture(GL_TEXTURE_2D, 0);
+
+    //rbo.reset(new Renderbuffer(GL_RGBA8, 256, 256));
+    //fbo->attachRenderbuffer(GL_COLOR_ATTACHMENT0, rbo->handle());
+    fbo->attachTexture2D(GL_COLOR_ATTACHMENT0, color_tex);
+    fbo->bind(GL_FRAMEBUFFER);
+
+    array<GLenum, 1> draw_bufs = { GL_COLOR_ATTACHMENT0 };
+    drawBuffers(draw_bufs);
+
+    cout << *fbo << endl;
+
     initScene();
 
     while (!glfwWindowShouldClose(win))
     {
       renderScene();
 
-      // Swap front and back buffers
-      // Poll for and process events
+      // Swap front and back buffers, poll for and process events.
       glfwSwapBuffers(win);
       glfwPollEvents();
     }
 
-    vector<Pixel> pixels(winWidth * winHeight);
-    glReadBuffer(GL_FRONT);
-    glReadPixels(0, 0, winWidth, winHeight, GL_RGBA, GL_UNSIGNED_BYTE,
-                 pixels.data());
-    writePpm("framebuffer.ppm", winWidth, winHeight, pixels);
+    //fbo->bind(GL_READ_FRAMEBUFFER);
+    vector<Pixel8ui> img(4092 * 4092);
+    //glReadBuffer(GL_COLOR_ATTACHMENT0);
+    glReadPixels(0, 0, 4092, 4092, GL_RGB, GL_UNSIGNED_BYTE, (GLvoid*)img.data());
+    checkError("glReadPixels");
+    writePpm("framebuffer.ppm", 4092, 4092, img);
+
+
+    glGetTexImage(GL_TEXTURE_2D,
+      0,
+      GL_RGB,
+      GL_UNSIGNED_BYTE,
+      (GLvoid*)img.data());
+    checkError("glGetTexImage");
+    writePpm("framebuffer2.ppm", 4092, 4092, img);
+
 
     // Close window and terminate GLFW.
     glfwDestroyWindow(win);
