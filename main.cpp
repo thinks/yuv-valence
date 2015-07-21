@@ -19,8 +19,13 @@ using namespace ndj;
 using namespace thx;
 
 GLFWwindow* win = nullptr;
-int winWidth = 480;
-int winHeight = 480;
+int win_width = 480;
+int win_height = 480;
+
+GLsizei const kMaxFboWidth = 8192;
+GLsizei const kMaxFboHeight = 8192;
+GLsizei fbo_width = 0;
+GLsizei fbo_height = 0;
 
 unique_ptr<ShaderProgram> phong_yuv;
 unique_ptr<VertexArray> phong_yuv_va;
@@ -33,7 +38,15 @@ unique_ptr<ArrayBuffer> obj_pos_vbo;
 unique_ptr<ArrayBuffer> yuv_vbo;
 unique_ptr<ElementArrayBuffer> tri_index_ibo;
 unique_ptr<Framebuffer> fbo;
-unique_ptr<Renderbuffer> rbo;
+//unique_ptr<Texture2D> rgb_tex;
+//unique_ptr<Renderbuffer> rbo;
+unique_ptr<ShaderProgram> screen_tex;
+unique_ptr<UniformBuffer> screen_tex_camera_ubo;
+unique_ptr<UniformBuffer> screen_tex_model_ubo;
+unique_ptr<VertexArray> screen_tex_va;
+unique_ptr<ArrayBuffer> screen_tex_obj_pos_vbo;
+unique_ptr<ArrayBuffer> screen_tex_uv_vbo;
+unique_ptr<ElementArrayBuffer> screen_tex_tri_ibo;
 
 typedef vec<2, GLfloat> Vec2f;
 typedef vec<3, GLfloat> Vec3f;
@@ -117,8 +130,8 @@ void framebufferSizeCallback(GLFWwindow* win,
 {
   //cout << "framebufferSizeCallback" << endl;
 
-  winWidth = w;
-  winHeight = h;
+  win_width = w;
+  win_height = h;
   viewport(0, 0, w, h);
 }
 
@@ -198,7 +211,7 @@ void initGLEW()
     checkError("glewInit");
   }
   catch (exception const& ex) {
-    cout << "Warning: " << ex.what() << endl;
+    cerr << "Warning: " << ex.what() << endl;
   }
 }
 
@@ -212,8 +225,8 @@ void initGL()
   cullFace(GL_BACK);
   enable(GL_CULL_FACE);
 
-  glfwGetFramebufferSize(win, &winWidth, &winHeight);
-  viewport(0, 0, winWidth, winHeight);
+  glfwGetFramebufferSize(win, &win_width, &win_height);
+  viewport(0, 0, win_width, win_height);
 
   int glfwMajor = 0;
   int glfwMinor = 0;
@@ -230,31 +243,48 @@ void initGL()
     << "GL_SHADING_LANGUAGE_VERSION: "
       << getString(GL_SHADING_LANGUAGE_VERSION) << "\n";
 
-  GLint maxVertexAttribs = 0;
-  getIntegerv(GL_MAX_VERTEX_ATTRIBS, &maxVertexAttribs);
+  GLint const maxVertexAttribs = getInteger(GL_MAX_VERTEX_ATTRIBS);
+  GLint const max_renderbuffer_size = getInteger(GL_MAX_RENDERBUFFER_SIZE);
+  GLint const max_draw_buffers = getInteger(GL_MAX_DRAW_BUFFERS);
+  GLint const max_texture_size = getInteger(GL_MAX_TEXTURE_SIZE);
+  array<GLint, 2> const max_viewport_dims =
+    getIntegers<2>(GL_MAX_VIEWPORT_DIMS);
+
+  fbo_width = std::min(max_texture_size, max_viewport_dims[0]);
+  fbo_height = std::min(max_texture_size, max_viewport_dims[1]);
+  fbo_width = std::min(fbo_width, fbo_height);
+  fbo_height = std::min(fbo_width, fbo_height);
+  fbo_width = std::min(fbo_width, kMaxFboWidth);
+  fbo_height = std::min(fbo_height, kMaxFboHeight);
+
   cout << "GL_MAX_VERTEX_ATTRIBS: " << maxVertexAttribs << "\n";
-
-  GLint max_renderbuffer_size = 0;
-  getIntegerv(GL_MAX_RENDERBUFFER_SIZE, &max_renderbuffer_size);
   cout << "GL_MAX_RENDERBUFFER_SIZE: " << max_renderbuffer_size << "\n";
-
-  GLint max_draw_buffers = 0;
-  getIntegerv(GL_MAX_DRAW_BUFFERS, &max_draw_buffers);
   cout << "GL_MAX_DRAW_BUFFERS: " << max_draw_buffers << "\n";
-}
+  cout << "GL_MAX_TEXTURE_SIZE: " << max_texture_size << endl;
+  cout << "GL_MAX_VIEWPORT_DIMS: "
+       << max_viewport_dims[0] << ", " << max_viewport_dims[1] << endl;
+  cout << "FBO width: " << fbo_width << endl;
+  cout << "FBO height: " << fbo_height << endl;
 
-void buildShaderPrograms()
-{
-  phong_yuv.reset(new ShaderProgram(
-    VertexShader(readShaderFile("shaders/phong_yuv.vs")),
-    GeometryShader(readShaderFile("shaders/phong_yuv.gs")),
-    FragmentShader(readShaderFile("shaders/phong_yuv.fs"))));
-  phong_yuv->activeUniformBlock("Camera").bind(1);
-  phong_yuv->activeUniformBlock("LightColor").bind(2);
-  phong_yuv->activeUniformBlock("LightDirection").bind(3);
-  phong_yuv->activeUniformBlock("Material").bind(4);
-  phong_yuv->activeUniformBlock("Model").bind(5);
-  cout << "phong_yuv:" << endl << *phong_yuv << endl;
+  fbo.reset(new Framebuffer);
+
+  GLuint color_tex;
+  glGenTextures(1, &color_tex);
+  glBindTexture(GL_TEXTURE_2D, color_tex);
+  //glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+  //glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+  //NULL means reserve texture memory, but texels are undefined
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, fbo_width, fbo_height, 0, GL_RGB,
+               GL_UNSIGNED_BYTE, nullptr);
+  glBindTexture(GL_TEXTURE_2D, 0);
+
+  //rbo.reset(new Renderbuffer(GL_RGBA8, 256, 256));
+  //fbo->attachRenderbuffer(GL_COLOR_ATTACHMENT0, rbo->handle());
+  fbo->attachTexture2D(GL_COLOR_ATTACHMENT0, color_tex);
+
+  cout << *fbo << endl;
 }
 
 void triangulate(const vector<Vec2f>& pos, vector<Triangle>* tri_index)
@@ -394,10 +424,31 @@ void makeMesh(const GLfloat x_min, const GLfloat y_min, const GLfloat z_min,
   }
 }
 
+void buildShaderPrograms()
+{
+  phong_yuv.reset(new ShaderProgram(
+    VertexShader(readShaderFile("shaders/phong_yuv.vs")),
+    GeometryShader(readShaderFile("shaders/phong_yuv.gs")),
+    FragmentShader(readShaderFile("shaders/phong_yuv.fs"))));
+  phong_yuv->activeUniformBlock("Camera").bind(1);
+  phong_yuv->activeUniformBlock("LightColor").bind(2);
+  phong_yuv->activeUniformBlock("LightDirection").bind(3);
+  phong_yuv->activeUniformBlock("Material").bind(4);
+  phong_yuv->activeUniformBlock("Model").bind(5);
+  cout << "phong_yuv:" << endl << *phong_yuv << endl;
+
+  screen_tex.reset(new ShaderProgram(
+    VertexShader(readShaderFile("shaders/screen_tex.vs")),
+    FragmentShader(readShaderFile("shaders/screen_tex.fs"))));
+  screen_tex->activeUniformBlock("Camera").bind(6);
+  screen_tex->activeUniformBlock("Model").bind(7);
+  screen_tex->setUniform1<GLint>(
+    screen_tex->activeUniform("sampler"), 0); // Texture unit 0.
+  cout << "screen_tex:" << endl << *screen_tex << endl;
+}
+
 void initScene()
 {
-  buildShaderPrograms();
-
   const GLfloat x_min = -10.f;
   const GLfloat y_min = -10.f;
   const GLfloat z_min = -1.f;
@@ -492,7 +543,7 @@ void initScene()
   tri_index_ibo.reset(new ElementArrayBuffer(
     tri_index.size() * sizeof(Triangle), &tri_index[0]));
 
-  // Create vertex array to remember bindings.
+  // Create vertex array to "remember" bindings.
   phong_yuv_va.reset(new VertexArray);
   phong_yuv_va->bind();
 
@@ -524,10 +575,6 @@ void initScene()
   const Bindor<ElementArrayBuffer> tri_index_bindor(*tri_index_ibo);
   phong_yuv_va->release();
 
-  // ----------------------
-  // Create framebuffer.
-  // ----------------------
-
 #if 1
   cout << "obj_pos count: "
        << obj_pos_vbo->sizeInBytes() / sizeof(Vec3f)
@@ -544,13 +591,103 @@ void initScene()
 #endif
 }
 
-void renderScene()
+void initScreen()
 {
-  //viewport(0, 0, winWidth, winHeight);
-  viewport(0, 0, 4092, 4092);
+  // --------------------------
+  // Initialize uniform blocks.
+  // --------------------------
 
-  clear(GL_COLOR_BUFFER_BIT);
+  // Camera.
+  array<GLfloat, 2 * 16> camera = {
+    1.f, 0.f, 0.f, 0.f, // view_from_world matrix, column 0.
+    0.f, 1.f, 0.f, 0.f,
+    0.f, 0.f, 1.f, 0.f,
+    0.f, 0.f, 0.f, 1.f,
+    1.f, 0.f, 0.f, 0.f, // clip_from_view, column 0.
+    0.f, 1.f, 0.f, 0.f,
+    0.f, 0.f, 1.f, 0.f,
+    0.f, 0.f, 0.f, 1.f };
+  makeOrthographicProjectionMatrix(
+    -1.f, 1.f,
+    -1.f, 1.f,
+    -1.f, 1.f,
+    &camera[16]);
+  screen_tex_camera_ubo.reset(new UniformBuffer(
+    camera.size() * sizeof(GLfloat), camera.data()));
+  bindUniformBuffer(*screen_tex, "Camera", *screen_tex_camera_ubo);
 
+  // Model.
+  const array<GLfloat, 1 * 16> model = {
+    1.f, 0.f, 0.f, 0.f, // Field: world_from_obj matrix, column 0.
+    0.f, 1.f, 0.f, 0.f,
+    0.f, 0.f, 1.f, 0.f,
+    0.f, 0.f, 0.f, 1.f };
+  screen_tex_model_ubo.reset(new UniformBuffer(
+    model.size() * sizeof(GLfloat), model.data()));
+  bindUniformBuffer(*screen_tex, "Model", *screen_tex_model_ubo);
+
+  // ----------------------
+  // Initialize attributes.
+  // ----------------------
+
+  array<Vec3f, 4> obj_pos;
+  array<Vec2f, 4> uv;
+  array<Triangle, 2> tri_index;
+  obj_pos[0] = Vec3f(-1.f, -1.f, 0.f);
+  obj_pos[1] = Vec3f(+1.f, -1.f, 0.f);
+  obj_pos[2] = Vec3f(+1.f, +1.f, 0.f);
+  obj_pos[3] = Vec3f(-1.f, +1.f, 0.f);
+  uv[0] = Vec2f(0.f, 0.f);
+  uv[1] = Vec2f(1.f, 0.f);
+  uv[2] = Vec2f(1.f, 1.f);
+  uv[3] = Vec2f(0.f, 1.f);
+  tri_index[0] = Triangle(0, 1, 2);
+  tri_index[1] = Triangle(2, 3, 0);
+
+  //writeObj("screen_tex.obj", obj_pos, tri_index); // TMP!!
+
+  screen_tex_obj_pos_vbo.reset(new ArrayBuffer(
+    obj_pos.size() * sizeof(Vec3f), obj_pos.data()));
+  screen_tex_uv_vbo.reset(new ArrayBuffer(
+    uv.size() * sizeof(Vec2f), uv.data()));
+  screen_tex_tri_ibo.reset(new ElementArrayBuffer(
+    tri_index.size() * sizeof(Triangle), tri_index.data()));
+
+  // Create vertex array to "remember" bindings.
+  screen_tex_va.reset(new VertexArray);
+  screen_tex_va->bind();
+
+  // Bind obj_pos attribute.
+  const Attrib obj_pos_attrib = screen_tex->activeAttrib("obj_pos");
+  const Bindor<ArrayBuffer> obj_pos_vbo_bindor(*screen_tex_obj_pos_vbo);
+  const VertexAttribArrayEnabler obj_pos_vaae(obj_pos_attrib.location);
+  vertexAttribPointer(
+    obj_pos_attrib.location,
+    3,        // Number of components.
+    VertexAttribType<GLfloat>::VALUE,
+    GL_FALSE, // Normalize.
+    0,        // Stride.
+    nullptr); // Read from currently bound VBO.
+
+  // Bind uv attribute.
+  const Attrib* uv_attrib = screen_tex->queryActiveAttrib("uv");
+  const Bindor<ArrayBuffer> uv_vbo_bindor(*screen_tex_uv_vbo);
+  const VertexAttribArrayEnabler uv_vaae(uv_attrib->location);
+  vertexAttribPointer(
+    uv_attrib->location,
+    2,        // Number of components.
+    VertexAttribType<GLfloat>::VALUE,
+    GL_FALSE, // Normalize.
+    0,        // Stride.
+    nullptr); // Read from currently bound VBO.
+
+  // Bind triangle indices.
+  const Bindor<ElementArrayBuffer> tri_index_bindor(*screen_tex_tri_ibo);
+  screen_tex_va->release();
+}
+
+void drawScene()
+{
   const Bindor<ShaderProgram> phong_yuv_bindor(*phong_yuv);
   const Bindor<VertexArray> phong_yuv_va_bindor(*phong_yuv_va);
 
@@ -563,79 +700,85 @@ void renderScene()
     max_index,
     index_count,
     GLTypeEnum<GLushort>::value,
-    0); // Read indices from currently bound element array.
+    nullptr); // Read indices from currently bound element array.
+}
+
+void drawScreen()
+{
+  const Bindor<ShaderProgram> screen_tex_bindor(*screen_tex);
+  const Bindor<VertexArray> screen_tex_va_bindor(*screen_tex_va);
+
+  glActiveTexture(GL_TEXTURE0);
+  glBindTexture(GL_TEXTURE_2D, 1);
+
+  const GLuint min_index = 0;
+  const GLuint max_index =
+    (screen_tex_obj_pos_vbo->sizeInBytes() / sizeof(Vec3f)) - 1;
+  const GLsizei index_count =
+    3 * screen_tex_tri_ibo->sizeInBytes() / sizeof(Vec3us);
+  drawRangeElements(
+    GL_TRIANGLES,
+    min_index,
+    max_index,
+    index_count,
+    GLTypeEnum<GLushort>::value,
+    nullptr); // Read indices from currently bound element array.
+  glBindTexture(GL_TEXTURE_2D, 0);
+}
+
+void renderTexture()
+{
+  fbo->bind(GL_DRAW_FRAMEBUFFER);
+  viewport(0, 0, fbo_width, fbo_height);
+  array<GLenum, 1> draw_bufs = { GL_COLOR_ATTACHMENT0 };
+  drawBuffers(draw_bufs);
+  array<GLfloat, 4> clear_color = { .5f, .5f, .5f, 1.f };
+  clearBufferfv(GL_COLOR, 0, clear_color.data());
+  drawScene();
+  fbo->release(GL_DRAW_FRAMEBUFFER);
+}
+
+void renderScreen()
+{
+  viewport(0, 0, win_width, win_height);
+  array<GLenum, 1> draw_bufs = { GL_BACK };
+  drawBuffers(draw_bufs);
+  drawScreen();
+}
+
+void writeTexture(string const& filename)
+{
+  vector<Pixel8ui> img(fbo_width * fbo_height);
+  fbo->bind(GL_READ_FRAMEBUFFER);
+  readBuffer(GL_COLOR_ATTACHMENT0);
+  //namedFramebufferReadBuffer(fbo->handle(), GL_COLOR_ATTACHMENT0);
+  readPixels(0, 0, fbo_width, fbo_height, GL_RGB, GL_UNSIGNED_BYTE,
+             reinterpret_cast<GLvoid*>(img.data()));
+  writePpm(filename, fbo_width, fbo_height, img);
+  fbo->release(GL_READ_FRAMEBUFFER);
 }
 
 int main(int argc, char* argv[])
 {
-#if 1
-  {
-    vector<Pixel8ui> img(32 * 32);
-    for (size_t i = 0; i < img.size(); ++i)
-    {
-      img[i] = Pixel8ui(255, 0, 0);
-    }
-    writePpm("test.ppm", 32, 32, img);
-    cout << "wrote test.ppm" << endl;
-  }
-#endif
-
   try {
-    initGLFW(winWidth, winHeight);
+    initGLFW(win_width, win_height);
     initGLEW();
     initGL();
-
-    fbo.reset(new Framebuffer);
-
-    GLuint color_tex;
-    glGenTextures(1, &color_tex);
-    glBindTexture(GL_TEXTURE_2D, color_tex);
-    //glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-    //glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    //NULL means reserve texture memory, but texels are undefined
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 4092, 4092, 0, GL_RGB,
-                 GL_UNSIGNED_BYTE, NULL);
-    //glBindTexture(GL_TEXTURE_2D, 0);
-
-    //rbo.reset(new Renderbuffer(GL_RGBA8, 256, 256));
-    //fbo->attachRenderbuffer(GL_COLOR_ATTACHMENT0, rbo->handle());
-    fbo->attachTexture2D(GL_COLOR_ATTACHMENT0, color_tex);
-    fbo->bind(GL_FRAMEBUFFER);
-
-    array<GLenum, 1> draw_bufs = { GL_COLOR_ATTACHMENT0 };
-    drawBuffers(draw_bufs);
-
-    cout << *fbo << endl;
-
+    buildShaderPrograms();
     initScene();
+    initScreen();
 
     while (!glfwWindowShouldClose(win))
     {
-      renderScene();
+      renderTexture();
+      renderScreen();
 
       // Swap front and back buffers, poll for and process events.
       glfwSwapBuffers(win);
       glfwPollEvents();
     }
 
-    //fbo->bind(GL_READ_FRAMEBUFFER);
-    vector<Pixel8ui> img(4092 * 4092);
-    //glReadBuffer(GL_COLOR_ATTACHMENT0);
-    glReadPixels(0, 0, 4092, 4092, GL_RGB, GL_UNSIGNED_BYTE, (GLvoid*)img.data());
-    checkError("glReadPixels");
-    writePpm("framebuffer.ppm", 4092, 4092, img);
-
-
-    glGetTexImage(GL_TEXTURE_2D,
-      0,
-      GL_RGB,
-      GL_UNSIGNED_BYTE,
-      (GLvoid*)img.data());
-    checkError("glGetTexImage");
-    writePpm("framebuffer2.ppm", 4092, 4092, img);
-
+    writeTexture("tex.ppm");
 
     // Close window and terminate GLFW.
     glfwDestroyWindow(win);
@@ -665,3 +808,26 @@ int main(int argc, char* argv[])
 
   return EXIT_SUCCESS;
 }
+
+
+#if 0
+  {
+    vector<Pixel8ui> img(32 * 32);
+    for (size_t i = 0; i < img.size(); ++i)
+    {
+      img[i] = Pixel8ui(255, 0, 0);
+    }
+    writePpm("test.ppm", 32, 32, img);
+    cout << "wrote test.ppm" << endl;
+  }
+#endif
+
+#if 0
+    glGetTexImage(GL_TEXTURE_2D,
+      0,
+      GL_RGB,
+      GL_UNSIGNED_BYTE,
+      (GLvoid*)img.data());
+    checkError("glGetTexImage");
+    writePpm("framebuffer2.ppm", 4092, 4092, img);
+#endif

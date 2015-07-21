@@ -1,6 +1,6 @@
 #version 420 core 
 
-in vec3 obj_pos; // object space vertex coordinates.
+in vec3 obj_pos; // Object space vertex coordinates.
 in vec3 yuv;
 out vec3 yuv_vs;
 

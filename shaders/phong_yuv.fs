@@ -32,6 +32,4 @@ void main(void)
 
   frag_color = rgb *
     (diffuse * (light_diffuse_color * material_front_diffuse_color));
-  //gl_FragData[0] = rgb *
-  //  (diffuse * (light_diffuse_color * material_front_diffuse_color));
 }
