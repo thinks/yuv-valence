@@ -22,8 +22,8 @@ GLFWwindow* win = nullptr;
 int win_width = 480;
 int win_height = 480;
 
-GLsizei const kMaxFboWidth = 8192;
-GLsizei const kMaxFboHeight = 8192;
+GLsizei const kMaxFboWidth = 512;//8192;
+GLsizei const kMaxFboHeight = 512;//8192;
 GLsizei fbo_width = 0;
 GLsizei fbo_height = 0;
 
@@ -38,7 +38,7 @@ unique_ptr<ArrayBuffer> obj_pos_vbo;
 unique_ptr<ArrayBuffer> yuv_vbo;
 unique_ptr<ElementArrayBuffer> tri_index_ibo;
 unique_ptr<Framebuffer> fbo;
-//unique_ptr<Texture2D> rgb_tex;
+unique_ptr<Texture2D> rgb_tex;
 //unique_ptr<Renderbuffer> rbo;
 unique_ptr<ShaderProgram> screen_tex;
 unique_ptr<UniformBuffer> screen_tex_camera_ubo;
@@ -179,14 +179,16 @@ void bindUniformBuffer(ndj::ShaderProgram const& shaderProgram,
 //! DOCS
 void initGLFW(const int width, const int height)
 {
-  if (!glfwInit()) {
+  if (!glfwInit())
+  {
     throw runtime_error("GLFW init error");
   }
 
   glfwWindowHint(GLFW_SAMPLES, 4);
 
   win = glfwCreateWindow(width, height, "yuv-valence", nullptr, nullptr);
-  if (win == nullptr) {
+  if (win == nullptr)
+  {
     throw runtime_error("GLFW Open Window error");
   }
   glfwMakeContextCurrent(win);
@@ -266,25 +268,15 @@ void initGL()
   cout << "FBO width: " << fbo_width << endl;
   cout << "FBO height: " << fbo_height << endl;
 
+  rgb_tex.reset(new Texture2D(GL_TEXTURE_2D, fbo_width, fbo_height, 0, GL_RGB,
+                              0, GL_RGB, GL_UNSIGNED_BYTE, nullptr));
+  setTextureParameter(*rgb_tex, GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+  setTextureParameter(*rgb_tex, GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+  cout << endl << *rgb_tex << endl;
+
   fbo.reset(new Framebuffer);
-
-  GLuint color_tex;
-  glGenTextures(1, &color_tex);
-  glBindTexture(GL_TEXTURE_2D, color_tex);
-  //glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-  //glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-  //NULL means reserve texture memory, but texels are undefined
-  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, fbo_width, fbo_height, 0, GL_RGB,
-               GL_UNSIGNED_BYTE, nullptr);
-  glBindTexture(GL_TEXTURE_2D, 0);
-
-  //rbo.reset(new Renderbuffer(GL_RGBA8, 256, 256));
-  //fbo->attachRenderbuffer(GL_COLOR_ATTACHMENT0, rbo->handle());
-  fbo->attachTexture2D(GL_COLOR_ATTACHMENT0, color_tex);
-
-  cout << *fbo << endl;
+  fbo->attachTexture2D(GL_COLOR_ATTACHMENT0, rgb_tex->handle());
+  cout << endl << *fbo << endl;
 }
 
 void triangulate(const vector<Vec2f>& pos, vector<Triangle>* tri_index)
@@ -442,8 +434,6 @@ void buildShaderPrograms()
     FragmentShader(readShaderFile("shaders/screen_tex.fs"))));
   screen_tex->activeUniformBlock("Camera").bind(6);
   screen_tex->activeUniformBlock("Model").bind(7);
-  screen_tex->setUniform1<GLint>(
-    screen_tex->activeUniform("sampler"), 0); // Texture unit 0.
   cout << "screen_tex:" << endl << *screen_tex << endl;
 }
 
@@ -705,11 +695,10 @@ void drawScene()
 
 void drawScreen()
 {
+  activeTexture(GL_TEXTURE0);
   const Bindor<ShaderProgram> screen_tex_bindor(*screen_tex);
   const Bindor<VertexArray> screen_tex_va_bindor(*screen_tex_va);
-
-  glActiveTexture(GL_TEXTURE0);
-  glBindTexture(GL_TEXTURE_2D, 1);
+  const TextureBindor<Texture2D> tex_bindor(GL_TEXTURE_2D, *rgb_tex);
 
   const GLuint min_index = 0;
   const GLuint max_index =
@@ -723,7 +712,6 @@ void drawScreen()
     index_count,
     GLTypeEnum<GLushort>::value,
     nullptr); // Read indices from currently bound element array.
-  glBindTexture(GL_TEXTURE_2D, 0);
 }
 
 void renderTexture()
